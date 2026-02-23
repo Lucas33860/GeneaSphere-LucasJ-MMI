@@ -15,6 +15,48 @@ const spouseSchema = z.object({
   separation_date: z.string().date().nullable().optional(),
 });
 
+// ── GET : liste toutes les unions et parentés avec noms des membres ──
+export async function GET(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+
+  const { searchParams } = new URL(request.url);
+  const type = searchParams.get("type"); // "unions" | "parentages" | null (les deux)
+
+  const result: Record<string, unknown> = {};
+
+  if (!type || type === "unions") {
+    const { data: unions, error } = await supabase
+      .from("spouses")
+      .select(`
+        *,
+        member1:member1_id ( id, first_name, last_name ),
+        member2:member2_id ( id, first_name, last_name )
+      `)
+      .order("created_at", { ascending: false });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    result.unions = unions ?? [];
+  }
+
+  if (!type || type === "parentages") {
+    const { data: parentages, error } = await supabase
+      .from("parentage")
+      .select(`
+        *,
+        child:child_id ( id, first_name, last_name ),
+        father:father_id ( id, first_name, last_name ),
+        mother:mother_id ( id, first_name, last_name )
+      `)
+      .order("created_at", { ascending: false });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    result.parentages = parentages ?? [];
+  }
+
+  return NextResponse.json(result);
+}
+
+// ── POST : créer une union ou une parenté ────────────────────────
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
