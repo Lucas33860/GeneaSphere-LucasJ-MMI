@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -19,7 +18,6 @@ const registerSchema = z.object({
 type RegisterInput = z.infer<typeof registerSchema>;
 
 export function RegisterForm() {
-  const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -49,21 +47,35 @@ export function RegisterForm() {
     }
 
     setSuccess(true);
-    // Si Supabase ne demande pas de confirmation d'email, on connecte directement
-    setTimeout(() => router.push("/login"), 2000);
   };
 
-  if (success) {
-    return (
-      <div className="text-center space-y-2">
-        <div className="text-4xl">✓</div>
-        <p className="text-green-700 font-medium">Compte créé avec succès !</p>
-        <p className="text-sm text-gray-500">Redirection vers la connexion…</p>
-      </div>
-    );
-  }
-
   return (
+    <>
+    {/* ── Modal confirmation email ──────────────────────────── */}
+    {success && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-sm w-full text-center space-y-4">
+          <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto text-3xl">
+            📧
+          </div>
+          <h2 className="text-xl font-bold text-gray-900">Vérifiez vos mails !</h2>
+          <p className="text-gray-600 text-sm">
+            Un email de confirmation a été envoyé à votre adresse.<br />
+            Cliquez sur le lien dans le mail pour activer votre compte.
+          </p>
+          <p className="text-xs text-gray-400">
+            Pensez à vérifier vos spams si vous ne le trouvez pas.
+          </p>
+          <a
+            href="/login"
+            className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition-colors text-sm"
+          >
+            Aller à la connexion
+          </a>
+        </div>
+      </div>
+    )}
+
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -134,5 +146,6 @@ export function RegisterForm() {
         </a>
       </p>
     </form>
+    </>
   );
 }
