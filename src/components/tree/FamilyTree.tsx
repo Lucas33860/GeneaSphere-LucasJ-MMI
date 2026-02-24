@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import * as d3 from "d3";
 import type { Member, Spouse } from "@/types";
 
@@ -99,8 +99,8 @@ export function FamilyTree({
 }: FamilyTreeProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const { person, father, mother, siblings, parentUnion } = data;
-  const motherOtherUnions = data.motherOtherUnions ?? [];
-  const ownUnions         = data.ownUnions         ?? [];
+  const motherOtherUnions = useMemo(() => data.motherOtherUnions ?? [], [data.motherOtherUnions]);
+  const ownUnions         = useMemo(() => data.ownUnions         ?? [], [data.ownUnions]);
 
   // ── Niveaux d'expansion (0 = aucun, 1 = GP visibles, 2 = AGP visibles) ──
   const parentIds  = new Set([father?.id, mother?.id, ...motherOtherUnions.map(u => u.partner.id)].filter(Boolean) as string[]);

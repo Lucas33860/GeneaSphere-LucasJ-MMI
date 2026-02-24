@@ -39,6 +39,7 @@ export function MemberCard({ member, onClick }: MemberCardProps) {
     >
       <div className="flex items-center gap-3">
         {member.photo_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={member.photo_url}
             alt={fullName}
