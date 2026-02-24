@@ -57,6 +57,7 @@ export default function TreePage() {
   }, []);
 
   // ── Chargement de l'arbre ─────────────────────────────────────
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!selectedId) return;
     setLoadingTree(true);
@@ -68,6 +69,7 @@ export default function TreePage() {
       .then(data => { setTreeData(data); setLoadingTree(false); })
       .catch(() => { setTreeError("Impossible de charger l'arbre"); setLoadingTree(false); });
   }, [selectedId]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const refreshTree = useCallback((id: string) => {
     fetch(`/api/tree?person_id=${id}`)

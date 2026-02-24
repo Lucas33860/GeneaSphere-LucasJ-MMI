@@ -42,6 +42,11 @@ export default function MembersPage() {
   const [panel, setPanel] = useState<Panel>(null);
   const [feedback, setFeedback] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
 
+  const notify = (type: "ok" | "err", msg: string) => {
+    setFeedback({ type, msg });
+    setTimeout(() => setFeedback(null), 3000);
+  };
+
   const fetchMembers = useCallback(async () => {
     const res = await fetch("/api/members").catch(() => null);
     if (!res) { notify("err", "Impossible de charger les membres"); setLoading(false); return; }
@@ -49,12 +54,9 @@ export default function MembersPage() {
     setLoading(false);
   }, []);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
-
-  const notify = (type: "ok" | "err", msg: string) => {
-    setFeedback({ type, msg });
-    setTimeout(() => setFeedback(null), 3000);
-  };
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const togglePanel = (p: Panel) => setPanel(prev => prev === p ? null : p);
 
@@ -248,25 +250,29 @@ function ParentageForm({ members, onSuccess, onError }: { members: Member[]; onS
     onSuccess();
   };
 
-  const MemberSelect = ({ name, label, error }: { name: keyof ParentageInput; label: string; error?: string }) => (
-    <Field label={label} error={error}>
-      <select {...register(name)} className={inputCls}>
-        <option value="">— Sélectionner —</option>
-        {members.map(m => (
-          <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
-        ))}
-      </select>
-    </Field>
-  );
-
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="bg-white border border-gray-100 rounded-xl p-5 space-y-4">
       <h2 className="font-semibold text-gray-800">Définir la parenté</h2>
       <p className="text-sm text-gray-500">Associez un enfant à son père et/ou sa mère.</p>
-      <MemberSelect name="child_id" label="Enfant *" error={errors.child_id?.message} />
+      <Field label="Enfant *" error={errors.child_id?.message}>
+        <select {...register("child_id")} className={inputCls}>
+          <option value="">— Sélectionner —</option>
+          {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+        </select>
+      </Field>
       <div className="grid grid-cols-2 gap-4">
-        <MemberSelect name="father_id" label="Père" error={errors.father_id?.message} />
-        <MemberSelect name="mother_id" label="Mère" error={errors.mother_id?.message} />
+        <Field label="Père" error={errors.father_id?.message}>
+          <select {...register("father_id")} className={inputCls}>
+            <option value="">— Sélectionner —</option>
+            {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+          </select>
+        </Field>
+        <Field label="Mère" error={errors.mother_id?.message}>
+          <select {...register("mother_id")} className={inputCls}>
+            <option value="">— Sélectionner —</option>
+            {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
+          </select>
+        </Field>
       </div>
       <button type="submit" disabled={isSubmitting} className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
         {isSubmitting ? "Enregistrement…" : "Définir la parenté"}
