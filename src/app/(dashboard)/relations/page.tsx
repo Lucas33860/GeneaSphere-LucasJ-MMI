@@ -12,6 +12,7 @@ interface UnionRow {
   id: string;
   member1_id: string;
   member2_id: string;
+  union_type: 'couple' | 'marriage';
   union_date: string | null;
   separation_date: string | null;
   member1: MemberSnap;
@@ -42,6 +43,7 @@ export default function RelationsPage() {
   const [editingUnion,    setEditingUnion]    = useState<UnionRow | null>(null);
   const [editingParentage, setEditingParentage] = useState<ParentageRow | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showUnionForm, setShowUnionForm] = useState(false);
 
   const notify = (type: "ok" | "err", msg: string) => {
     setFeedback({ type, msg });
@@ -108,9 +110,24 @@ export default function RelationsPage() {
           <>
             {/* ── Unions ─────────────────────────────────────────── */}
             <section className="space-y-3">
-              <h2 className="text-lg font-semibold text-gray-800">
-                Unions <span className="text-gray-400 text-base font-normal">({unions.length})</span>
-              </h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-800">
+                  Unions <span className="text-gray-400 text-base font-normal">({unions.length})</span>
+                </h2>
+                <button
+                  onClick={() => setShowUnionForm(v => !v)}
+                  className="px-3 py-1.5 text-xs rounded-lg bg-pink-50 text-pink-700 hover:bg-pink-100 font-medium"
+                >
+                  {showUnionForm ? "Annuler" : "+ Nouvelle union"}
+                </button>
+              </div>
+              {showUnionForm && (
+                <UnionForm
+                  members={members}
+                  onSuccess={() => { setShowUnionForm(false); notify("ok", "Union créée."); loadAll(); }}
+                  onError={m => notify("err", m)}
+                />
+              )}
               {unions.length === 0 ? (
                 <p className="text-gray-400 text-sm">Aucune union.</p>
               ) : (
@@ -177,20 +194,30 @@ export default function RelationsPage() {
   );
 }
 
+// ── Picto et libellé selon le type d'union ────────────────────────
+function unionPictoLabel(u: UnionRow): { picto: string; label: string } {
+  const sep = !!u.separation_date;
+  if (u.union_type === 'couple') {
+    return sep ? { picto: "💔", label: "Ex-couple" } : { picto: "♥", label: "Couple" };
+  }
+  return sep ? { picto: "💍✗", label: "Divorcé·e" } : { picto: "💍", label: "Marié·e" };
+}
+
 // ── Carte union ───────────────────────────────────────────────────
 function UnionCard({ union, onEdit, onDelete, deleting }: { union: UnionRow; onEdit: () => void; onDelete: () => void; deleting?: boolean }) {
   const isSep = !!union.separation_date;
+  const { picto, label } = unionPictoLabel(union);
   return (
     <div className="bg-white border border-gray-100 rounded-xl p-4 flex items-center gap-4">
-      <span className="text-2xl">{isSep ? "✗" : "♥"}</span>
+      <span className="text-2xl">{picto}</span>
       <div className="flex-1 min-w-0">
         <p className="font-semibold text-gray-900">
           {fullName(union.member1)} &nbsp;×&nbsp; {fullName(union.member2)}
         </p>
         <p className="text-xs text-gray-400">
-          {isSep
-            ? `Séparé${fmtDate(union.separation_date) ? ` le ${fmtDate(union.separation_date)}` : ""}`
-            : `Ensemble${fmtDate(union.union_date) ? ` depuis ${fmtDate(union.union_date)}` : ""}`}
+          {label}
+          {isSep && fmtDate(union.separation_date) ? ` · séparé le ${fmtDate(union.separation_date)}` : ""}
+          {!isSep && fmtDate(union.union_date) ? ` · depuis ${fmtDate(union.union_date)}` : ""}
         </p>
       </div>
       <div className="flex gap-2">
@@ -203,6 +230,63 @@ function UnionCard({ union, onEdit, onDelete, deleting }: { union: UnionRow; onE
   );
 }
 
+// ── 4 états d'union ───────────────────────────────────────────────
+type UnionState4 = "couple" | "ex-couple" | "marriage" | "divorce";
+
+const UNION_STATE_OPTIONS: {
+  value: UnionState4;
+  picto: string;
+  label: string;
+  desc: string;
+  active: string;
+}[] = [
+  { value: "couple",    picto: "♥",   label: "Couple",    desc: "En couple",        active: "bg-pink-500 border-pink-500 text-white" },
+  { value: "ex-couple", picto: "💔",  label: "Ex-couple", desc: "Séparés",          active: "bg-gray-400 border-gray-400 text-white" },
+  { value: "marriage",  picto: "💍",  label: "Marié·e",   desc: "Union officielle", active: "bg-yellow-500 border-yellow-500 text-white" },
+  { value: "divorce",   picto: "💍✗", label: "Divorcé·e", desc: "Mariage terminé",  active: "bg-slate-600 border-slate-600 text-white" },
+];
+
+function stateToBody(state: UnionState4, date: string) {
+  const isSep = state === "ex-couple" || state === "divorce";
+  return {
+    union_type:      state === "couple" || state === "ex-couple" ? "couple" : "marriage",
+    union_date:      !isSep ? (date || null) : null,
+    separation_date:  isSep ? (date || null) : null,
+  };
+}
+
+function unionToState4(u: { union_type: string; separation_date: string | null }): UnionState4 {
+  if (u.union_type === "couple") return u.separation_date ? "ex-couple" : "couple";
+  return u.separation_date ? "divorce" : "marriage";
+}
+
+// ── Sélecteur 4 états réutilisable ────────────────────────────────
+function UnionStateSelector({ value, onChange }: {
+  value: UnionState4 | null;
+  onChange: (v: UnionState4) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {UNION_STATE_OPTIONS.map(opt => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`flex flex-col items-center gap-0.5 py-3 px-2 rounded-xl border-2 font-medium transition-all ${
+            value === opt.value
+              ? opt.active + " shadow-md scale-[1.02]"
+              : "bg-gray-50 border-gray-200 text-gray-600 hover:border-gray-300 hover:bg-white"
+          }`}
+        >
+          <span className="text-xl">{opt.picto}</span>
+          <span className="text-sm font-semibold">{opt.label}</span>
+          <span className="text-xs opacity-60">{opt.desc}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Formulaire édition union ──────────────────────────────────────
 function EditUnionForm({ union, onCancel, onSuccess, onError }: {
   union: UnionRow;
@@ -210,25 +294,21 @@ function EditUnionForm({ union, onCancel, onSuccess, onError }: {
   onSuccess: () => void;
   onError: (m: string) => void;
 }) {
-  const isSepInit = !!union.separation_date;
-  const [statut, setStatut] = useState<"ensemble" | "séparé">(isSepInit ? "séparé" : "ensemble");
+  const [state, setState] = useState<UnionState4>(unionToState4(union));
   const [submitting, setSubmitting] = useState(false);
+  const isSep = state === "ex-couple" || state === "divorce";
   const { register, handleSubmit } = useForm({
     defaultValues: {
-      date: (isSepInit ? union.separation_date : union.union_date)?.slice(0, 10) ?? "",
+      date: (isSep ? union.separation_date : union.union_date)?.slice(0, 10) ?? "",
     },
   });
 
   const onSubmit = async (data: { date: string }) => {
     setSubmitting(true);
-    const body = {
-      union_date:      statut === "ensemble" ? (data.date || null) : null,
-      separation_date: statut === "séparé"   ? (data.date || null) : null,
-    };
     const res = await fetch(`/api/relations/${union.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(stateToBody(state, data.date)),
     });
     setSubmitting(false);
     if (!res.ok) { onError((await res.json()).error ?? "Erreur lors de la sauvegarde"); return; }
@@ -240,21 +320,10 @@ function EditUnionForm({ union, onCancel, onSuccess, onError }: {
       <p className="font-semibold text-gray-800 text-sm">
         Modifier : {fullName(union.member1)} × {fullName(union.member2)}
       </p>
-      <div className="flex gap-2">
-        {(["ensemble", "séparé"] as const).map(s => (
-          <button key={s} type="button" onClick={() => setStatut(s)}
-            className={`flex-1 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
-              statut === s
-                ? s === "ensemble" ? "bg-pink-500 text-white border-pink-500" : "bg-gray-400 text-white border-gray-400"
-                : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
-            }`}>
-            {s === "ensemble" ? "♥ Ensemble" : "✗ Séparé"}
-          </button>
-        ))}
-      </div>
+      <UnionStateSelector value={state} onChange={setState} />
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">
-          {statut === "ensemble" ? "Date de début" : "Date de séparation"}
+          {isSep ? "Date de séparation (optionnel)" : "Date de début (optionnel)"}
         </label>
         <input {...register("date")} type="date" className={inputCls} />
       </div>
@@ -359,6 +428,122 @@ function EditParentageForm({ parentage, members, onCancel, onSuccess, onError }:
           Annuler
         </button>
       </div>
+    </form>
+  );
+}
+
+// ── Formulaire création union ──────────────────────────────────────
+function UnionForm({ members, onSuccess, onError }: {
+  members: Member[];
+  onSuccess: () => void;
+  onError: (m: string) => void;
+}) {
+  const [state, setState] = useState<UnionState4 | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { register, handleSubmit, reset, watch } = useForm({
+    defaultValues: { member1_id: "", member2_id: "", date: "" },
+  });
+  const m1 = watch("member1_id");
+  const m2 = watch("member2_id");
+  const isSep = state === "ex-couple" || state === "divorce";
+
+  const onSubmit = async (data: { member1_id: string; member2_id: string; date: string }) => {
+    if (!data.member1_id || !data.member2_id) { onError("Veuillez sélectionner 2 membres."); return; }
+    if (data.member1_id === data.member2_id) { onError("Les deux membres doivent être différents."); return; }
+    if (!state) { onError("Choisissez un état d'union."); return; }
+    setSubmitting(true);
+    const res = await fetch("/api/relations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "spouse",
+        member1_id: data.member1_id,
+        member2_id: data.member2_id,
+        ...stateToBody(state, data.date),
+      }),
+    });
+    setSubmitting(false);
+    if (!res.ok) { onError((await res.json()).error ?? "Erreur lors de la création"); return; }
+    reset();
+    setState(null);
+    onSuccess();
+  };
+
+  const selectedOpt = UNION_STATE_OPTIONS.find(o => o.value === state);
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)} className="bg-white border-2 border-pink-200 rounded-2xl p-5 space-y-4 shadow-sm">
+      <p className="font-bold text-gray-900 text-base">Nouvelle union</p>
+
+      {/* ── Personnes ── */}
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">① Personnes</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Personne 1</label>
+            <select {...register("member1_id")} className={inputCls}>
+              <option value="">— Choisir —</option>
+              {members.map(m => (
+                <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Personne 2</label>
+            <select {...register("member2_id")} className={inputCls}>
+              <option value="">— Choisir —</option>
+              {members.filter(m => m.id !== m1).map(m => (
+                <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {m1 && m2 && m1 !== m2 && (
+          <p className="mt-1.5 text-xs text-pink-600 font-medium">
+            {members.find(m => m.id === m1)?.first_name} &amp; {members.find(m => m.id === m2)?.first_name}
+          </p>
+        )}
+      </div>
+
+      {/* ── État de l'union (4 cartes directes) ── */}
+      <div>
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">② État de l&apos;union</p>
+        <UnionStateSelector value={state} onChange={setState} />
+      </div>
+
+      {/* ── Date ── */}
+      {state && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            ③ Date <span className="font-normal normal-case text-gray-400">(optionnel)</span>
+          </p>
+          <label className="block text-xs text-gray-500 mb-1">
+            {isSep ? "Date de séparation / divorce" : "Date de début de l'union"}
+          </label>
+          <input {...register("date")} type="date" className={inputCls} />
+        </div>
+      )}
+
+      {/* ── Résumé ── */}
+      {state && m1 && m2 && m1 !== m2 && selectedOpt && (
+        <div className="bg-gray-50 rounded-xl px-4 py-2.5 text-sm text-gray-700 flex items-center gap-2">
+          <span className="text-lg">{selectedOpt.picto}</span>
+          <span>
+            <strong>{members.find(m => m.id === m1)?.first_name}</strong>
+            {" & "}
+            <strong>{members.find(m => m.id === m2)?.first_name}</strong>
+            {" — "}{selectedOpt.label}
+          </span>
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={submitting || !state || !m1 || !m2 || m1 === m2}
+        className="w-full bg-pink-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-pink-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        {submitting ? "Création…" : "Créer l'union"}
+      </button>
     </form>
   );
 }

@@ -37,6 +37,7 @@ export interface Spouse {
   id: string;
   member1_id: string;
   member2_id: string;
+  union_type: 'couple' | 'marriage';
   union_date: string | null;
   separation_date: string | null;
 }
@@ -46,15 +47,6 @@ export interface Relation {
   member: Member;
 }
 
-export interface FamilyTreeNode {
-  member: Member;
-  children: FamilyTreeNode[];
-  spouses: Member[];
-  parents: {
-    father: Member | null;
-    mother: Member | null;
-  };
-}
 
 export interface FamilyStats {
   total_members: number;

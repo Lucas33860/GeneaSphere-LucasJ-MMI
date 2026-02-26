@@ -10,11 +10,15 @@ export async function PATCH(request: Request, { params }: Params) {
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const body = await request.json();
-  const { union_date, separation_date } = body;
+  const { union_date, separation_date, union_type } = body;
 
   const { data, error } = await supabase
     .from("spouses")
-    .update({ union_date: union_date ?? null, separation_date: separation_date ?? null })
+    .update({
+      union_date: union_date ?? null,
+      separation_date: separation_date ?? null,
+      ...(union_type ? { union_type } : {}),
+    })
     .eq("id", id)
     .select()
     .single();

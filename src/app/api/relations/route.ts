@@ -11,6 +11,7 @@ const parentageSchema = z.object({
 const spouseSchema = z.object({
   member1_id: z.string().uuid(),
   member2_id: z.string().uuid(),
+  union_type: z.enum(['couple', 'marriage']).default('marriage').optional(),
   union_date: z.string().date().nullable().optional(),
   separation_date: z.string().date().nullable().optional(),
 });
