@@ -97,17 +97,23 @@ export async function GET(request: Request) {
     parentUnion = data;
   }
 
-  // ── Autres unions de la mère + leurs enfants (demi-frères) ─────
-  // → chaque union supplémentaire affiche ses enfants SOUS son propre losange
+  // IDs des frères/sœurs déjà trouvés (pour éviter les doublons)
+  const sibIds = new Set((siblings as Array<{ id: string }>).map(s => s.id));
+
+  // union/partner peuvent être null pour les enfants de parent unique
   type ExtraUnion = {
-    union: Record<string, unknown>;
-    partner: Record<string, unknown>;
+    union: Record<string, unknown> | null;
+    partner: Record<string, unknown> | null;
     children: Record<string, unknown>[];
   };
+
+  // ── Autres unions de la mère + enfants de parent unique côté mère ──
   const motherOtherUnions: ExtraUnion[] = [];
 
   if (parentage?.mother_id) {
     const motherId = parentage.mother_id;
+
+    // Unions de la mère avec d'autres partenaires
     const { data: allMomUnions } = await supabase
       .from("spouses")
       .select("*")
@@ -115,14 +121,12 @@ export async function GET(request: Request) {
 
     for (const u of (allMomUnions ?? [])) {
       const partnerId = u.member1_id === motherId ? u.member2_id : u.member1_id;
-      // Exclure l'union avec le père (déjà affichée)
       if (parentage.father_id && partnerId === parentage.father_id) continue;
 
       const { data: partner } = await supabase
         .from("members").select("*").eq("id", partnerId).single();
       if (!partner) continue;
 
-      // Enfants de CETTE union spécifique (mère + ce partenaire)
       const { data: childParentages } = await supabase
         .from("parentage")
         .select("child_id")
@@ -135,15 +139,84 @@ export async function GET(request: Request) {
         const { data: childData } = await supabase.from("members").select("*").in("id", childIds);
         children = childData ?? [];
       }
-
       motherOtherUnions.push({ union: u, partner, children });
+    }
+
+    // Enfants de la mère sans père déclaré (parent seul)
+    const { data: momAloneParentages } = await supabase
+      .from("parentage")
+      .select("child_id")
+      .eq("mother_id", motherId)
+      .is("father_id", null)
+      .neq("child_id", personId);
+
+    const momAloneIds = (momAloneParentages ?? [])
+      .map(p => p.child_id)
+      .filter(id => !sibIds.has(id));
+
+    if (momAloneIds.length > 0) {
+      const { data: aloneData } = await supabase.from("members").select("*").in("id", momAloneIds);
+      if (aloneData?.length) motherOtherUnions.push({ union: null, partner: null, children: aloneData });
     }
   }
 
-  // ── Propres unions de la personne (conjoint·e·s) ──────────────
+  // ── Autres unions du père + enfants de parent unique côté père ─────
+  const fatherOtherUnions: ExtraUnion[] = [];
+
+  if (parentage?.father_id) {
+    const fatherId = parentage.father_id;
+
+    const { data: allDadUnions } = await supabase
+      .from("spouses")
+      .select("*")
+      .or(`member1_id.eq.${fatherId},member2_id.eq.${fatherId}`);
+
+    for (const u of (allDadUnions ?? [])) {
+      const partnerId = u.member1_id === fatherId ? u.member2_id : u.member1_id;
+      if (parentage.mother_id && partnerId === parentage.mother_id) continue;
+
+      const { data: partner } = await supabase
+        .from("members").select("*").eq("id", partnerId).single();
+      if (!partner) continue;
+
+      const { data: childParentages } = await supabase
+        .from("parentage")
+        .select("child_id")
+        .eq("father_id", fatherId)
+        .eq("mother_id", partnerId);
+
+      const childIds = childParentages?.map((p) => p.child_id) ?? [];
+      let children: Record<string, unknown>[] = [];
+      if (childIds.length > 0) {
+        const { data: childData } = await supabase.from("members").select("*").in("id", childIds);
+        children = childData ?? [];
+      }
+      fatherOtherUnions.push({ union: u, partner, children });
+    }
+
+    // Enfants du père sans mère déclarée (parent seul)
+    const { data: dadAloneParentages } = await supabase
+      .from("parentage")
+      .select("child_id")
+      .eq("father_id", fatherId)
+      .is("mother_id", null)
+      .neq("child_id", personId);
+
+    const dadAloneIds = (dadAloneParentages ?? [])
+      .map(p => p.child_id)
+      .filter(id => !sibIds.has(id));
+
+    if (dadAloneIds.length > 0) {
+      const { data: aloneData } = await supabase.from("members").select("*").in("id", dadAloneIds);
+      if (aloneData?.length) fatherOtherUnions.push({ union: null, partner: null, children: aloneData });
+    }
+  }
+
+  // ── Propres unions de la personne (conjoint·e·s + enfants) ──────
   type OwnUnion = {
     union: Record<string, unknown>;
     partner: Record<string, unknown>;
+    children: Record<string, unknown>[];
   };
   const ownUnions: OwnUnion[] = [];
   const { data: ownSpousesData } = await supabase
@@ -156,8 +229,24 @@ export async function GET(request: Request) {
     const { data: partner } = await supabase
       .from("members").select("*").eq("id", partnerId).single();
     if (!partner) continue;
-    ownUnions.push({ union: u, partner });
+
+    // Enfants communs (person peut être père ou mère)
+    const { data: childParentages } = await supabase
+      .from("parentage")
+      .select("child_id")
+      .or(
+        `and(father_id.eq.${personId},mother_id.eq.${partnerId}),` +
+        `and(mother_id.eq.${personId},father_id.eq.${partnerId})`
+      );
+    const childIds = childParentages?.map(p => p.child_id) ?? [];
+    let children: Record<string, unknown>[] = [];
+    if (childIds.length > 0) {
+      const { data: childData } = await supabase.from("members").select("*").in("id", childIds);
+      children = childData ?? [];
+    }
+
+    ownUnions.push({ union: u, partner, children });
   }
 
-  return NextResponse.json({ person, father, mother, siblings, parentUnion, motherOtherUnions, ownUnions });
+  return NextResponse.json({ person, father, mother, siblings, parentUnion, motherOtherUnions, fatherOtherUnions, ownUnions });
 }

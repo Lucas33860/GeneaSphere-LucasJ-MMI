@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, Text, Line } from "@react-three/drei";
+import { OrbitControls, Text, Line, Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import type { Member, Spouse } from "@/types";
 
@@ -26,13 +26,14 @@ interface GraphEdge {
 
 // Correspond exactement à la réponse de /api/tree
 interface MotherOtherUnion {
-  union: Spouse;
-  partner: Member;
+  union: Spouse | null;    // null = enfant de parent seul (pas d'union enregistrée)
+  partner: Member | null;  // null = même raison
   children: Member[];
 }
 interface OwnUnionAPI {
   union: Spouse;
   partner: Member;
+  children: Member[];
 }
 interface TreeData {
   person: Member;
@@ -41,6 +42,7 @@ interface TreeData {
   siblings: Member[];
   parentUnion: Spouse | null;
   motherOtherUnions: MotherOtherUnion[];
+  fatherOtherUnions: MotherOtherUnion[];
   ownUnions: OwnUnionAPI[];
 }
 
@@ -124,25 +126,26 @@ function PersonSphere({ node, onClick }: {
         <meshStandardMaterial color={color} opacity={isDead ? 0.5 : 1} transparent={isDead} roughness={0.35} metalness={0.15} />
       </mesh>
 
-      <Text
-        position={[0, 1.6, 0]}
-        fontSize={0.7}
-        color="white"
-        outlineColor="#111827"
-        outlineWidth={0.07}
-        anchorX="center"
-        anchorY="bottom"
-        maxWidth={8}
-        renderOrder={1}
-      >
-        {fullName}
-      </Text>
-
-      {isDead && (
-        <Text position={[0, -1.3, 0]} fontSize={0.5} color="#9ca3af" outlineColor="#111827" outlineWidth={0.04} anchorX="center">
-          † {node.member.death_date?.slice(0, 4)}
+      <Billboard>
+        <Text
+          position={[0, 1.6, 0]}
+          fontSize={0.7}
+          color="white"
+          outlineColor="#111827"
+          outlineWidth={0.07}
+          anchorX="center"
+          anchorY="bottom"
+          maxWidth={8}
+          renderOrder={1}
+        >
+          {fullName}
         </Text>
-      )}
+        {isDead && (
+          <Text position={[0, -1.3, 0]} fontSize={0.5} color="#9ca3af" outlineColor="#111827" outlineWidth={0.04} anchorX="center">
+            † {node.member.death_date?.slice(0, 4)}
+          </Text>
+        )}
+      </Billboard>
       {hovered && (
         <mesh>
           <sphereGeometry args={[1.08, 32, 32]} />
@@ -163,9 +166,11 @@ function UnionSphere({ node }: { node: GraphUnion }) {
         <sphereGeometry args={[0.4, 24, 24]} />
         <meshStandardMaterial color={color} roughness={0.3} metalness={0.2} />
       </mesh>
-      <Text position={[0, 0.8, 0]} fontSize={0.5} anchorX="center" renderOrder={1}>
-        {picto}
-      </Text>
+      <Billboard>
+        <Text position={[0, 0.8, 0]} fontSize={0.5} anchorX="center" renderOrder={1}>
+          {picto}
+        </Text>
+      </Billboard>
     </group>
   );
 }
@@ -380,32 +385,45 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
     data.siblings.forEach(s => knownChildIds.add(s.id));
 
     motherOtherUnions.forEach((mou, ouIdx) => {
-      const otherUnionId = `u-${mou.union.id}`;
+      const motherPos = actualMother ?? motherDesired;
+      const halfChildren = (mou.children ?? []).filter(c => !knownChildIds.has(c.id));
 
-      // Ajouter le partenaire de la mère (l'autre conjoint)
+      // ── Cas parent seul : pas de partenaire ni d'union ───────────
+      if (!mou.partner) {
+        halfChildren.forEach((halfChild, hci) => {
+          knownChildIds.add(halfChild.id);
+          const hSide = hci % 2 === 0 ? 1 : -1;
+          const hDist = Math.ceil((hci + 1) / 2);
+          const desired: [number, number, number] = [
+            motherPos[0] + (ouIdx + 1) * 10,
+            motherPos[1] - PARENT_Y,
+            motherPos[2] + hSide * hDist * 8,
+          ];
+          const actualHalfChild = addPerson(halfChild, desired);
+          if (actualMother) addEdge(`e-alone-m-${halfChild.id}`, actualMother, actualHalfChild);
+          addDashedEdge(`e-halfsib-alone-m-${personId}-${halfChild.id}`, selfPos, actualHalfChild);
+        });
+        return;
+      }
+
+      // ── Cas normal : partenaire + union ──────────────────────────
+      const otherUnionId = `u-${mou.union!.id}`;
       const otherPartnerDesired: [number, number, number] = [
-        (actualMother ?? motherDesired)[0] + (ouIdx + 1) * 14,
-        (actualMother ?? motherDesired)[1],
-        (actualMother ?? motherDesired)[2] + (ouIdx + 1) * 8,
+        motherPos[0] + (ouIdx + 1) * 14,
+        motherPos[1],
+        motherPos[2] + (ouIdx + 1) * 8,
       ];
       const actualOtherPartner = addPerson(mou.partner, otherPartnerDesired);
 
-      // Nœud union entre mère et ce partenaire
-      const motherPos = actualMother ?? motherDesired;
       const otherUnionMid: [number, number, number] = [
         (motherPos[0] + actualOtherPartner[0]) / 2,
         motherPos[1],
         (motherPos[2] + actualOtherPartner[2]) / 2,
       ];
       const actualOtherUnionPos = addUnion(otherUnionId, mou.union, otherUnionMid);
-
-      if (actualMother) {
-        addEdge(`e-${otherUnionId}-mother`, actualMother, actualOtherUnionPos);
-      }
+      if (actualMother) addEdge(`e-${otherUnionId}-mother`, actualMother, actualOtherUnionPos);
       addEdge(`e-${otherUnionId}-partner`, actualOtherUnionPos, actualOtherPartner);
 
-      // Enfants de cette union = demi-frères/sœurs
-      const halfChildren = (mou.children ?? []).filter(c => !knownChildIds.has(c.id));
       halfChildren.forEach((halfChild, hci) => {
         knownChildIds.add(halfChild.id);
         const hSide = hci % 2 === 0 ? 1 : -1;
@@ -416,111 +434,86 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
           actualOtherUnionPos[2] + hSide * hDist * 8,
         ];
         const actualHalfChild = addPerson(halfChild, halfChildDesired);
-
-        // Lien plein depuis l'union
-        addEdge(
-          `e-halfchild-${halfChild.id}-union-${mou.union.id}`,
-          actualOtherUnionPos,
-          actualHalfChild
-        );
-
-        // Lien pointillé entre la personne et son demi-frère/sœur
-        addDashedEdge(
-          `e-halfsib-${personId}-${halfChild.id}`,
-          selfPos,
-          actualHalfChild
-        );
+        addEdge(`e-halfchild-${halfChild.id}-union-${mou.union!.id}`, actualOtherUnionPos, actualHalfChild);
+        addDashedEdge(`e-halfsib-${personId}-${halfChild.id}`, selfPos, actualHalfChild);
       });
     });
 
-    // ── Demi-frères/sœurs côté père ──────────────────────────────
-    // L'API ne fournit que motherOtherUnions, donc on fetch les données
-    // du père pour trouver ses autres unions
-    if (data.father && actualFather) {
-      try {
-        const fatherRes = await fetch(`/api/tree?person_id=${data.father.id}`);
-        if (fatherRes.ok) {
-          const fatherData: TreeData = await fatherRes.json();
+    // ── Demi-frères/sœurs côté père via fatherOtherUnions ───────────
+    const fatherOtherUnions = data.fatherOtherUnions ?? [];
+    fatherOtherUnions.forEach((fou, ouIdx) => {
+      const fPos = actualFather ?? fatherDesired;
+      const fatherHalfChildren = (fou.children ?? []).filter(c => !knownChildIds.has(c.id));
 
-          // Les "motherOtherUnions" du père = les autres unions de SA mère,
-          // pas ce qu'on veut. On veut les propres unions du père (ownUnions)
-          // autres que l'union parentale actuelle.
-          const currentParentUnionId = data.parentUnion?.id;
-
-          const fatherOtherUnions = fatherData.ownUnions.filter(
-            ou => ou.union.id !== currentParentUnionId
-          );
-
-          fatherOtherUnions.forEach((fou, ouIdx) => {
-            const otherUnionId = `u-${fou.union.id}`;
-
-            // Ajouter le partenaire du père
-            const otherPartnerDesired: [number, number, number] = [
-              actualFather[0] - (ouIdx + 1) * 14,
-              actualFather[1],
-              actualFather[2] + (ouIdx + 1) * 8,
-            ];
-            const actualOtherPartner = addPerson(fou.partner, otherPartnerDesired);
-
-            // Nœud union
-            const otherUnionMid: [number, number, number] = [
-              (actualFather[0] + actualOtherPartner[0]) / 2,
-              actualFather[1],
-              (actualFather[2] + actualOtherPartner[2]) / 2,
-            ];
-            const actualOtherUnionPos = addUnion(otherUnionId, fou.union, otherUnionMid);
-            addEdge(`e-${otherUnionId}-father`, actualFather, actualOtherUnionPos);
-            addEdge(`e-${otherUnionId}-partner`, actualOtherUnionPos, actualOtherPartner);
-
-            // Fetch les enfants de cette union du père
-            // L'API ownUnions ne retourne pas les enfants, donc on fetch
-            // les données du partenaire pour trouver les enfants
-            // OU on fetch l'arbre du partenaire pour obtenir ses enfants avec le père
-            // Approche : fetch l'arbre de ce partenaire
-            fetch(`/api/tree?person_id=${fou.partner.id}`)
-              .then(r => r.ok ? r.json() : null)
-              .then((partnerData: TreeData | null) => {
-                if (!partnerData) return;
-
-                // Les enfants communs père + partenaire sont dans les ownUnions
-                // du partenaire, ou comme siblings du partenaire's children
-                // Meilleure approche : chercher dans partnerData.ownUnions
-                // l'union avec le père
-
-                const sharedUnion = partnerData.ownUnions.find(
-                  ou => ou.union.id === fou.union.id
-                );
-                // L'API ownUnions ne retourne pas les enfants non plus...
-                // On va chercher les enfants via motherOtherUnions du partenaire
-                // si le père est listé comme "autre union" de la mère du partenaire
-
-                // Alternative plus simple : chercher directement dans
-                // partnerData.motherOtherUnions ou partnerData.siblings
-                // les enfants qui ont ce père
-
-                // En fait, le plus efficace est de modifier l'API.
-                // Pour l'instant, on affiche au moins l'union et le partenaire.
-              })
-              .catch(() => {});
-          });
-        }
-      } catch {
-        // Silencieux
+      // ── Cas parent seul : pas de partenaire ──────────────────────
+      if (!fou.partner) {
+        fatherHalfChildren.forEach((halfChild, hci) => {
+          knownChildIds.add(halfChild.id);
+          const hSide = hci % 2 === 0 ? 1 : -1;
+          const hDist = Math.ceil((hci + 1) / 2);
+          const desired: [number, number, number] = [
+            fPos[0] - (ouIdx + 1) * 10,
+            fPos[1] - PARENT_Y,
+            fPos[2] + hSide * hDist * 8,
+          ];
+          const actualHalfChild = addPerson(halfChild, desired);
+          if (actualFather) addEdge(`e-alone-f-${halfChild.id}`, actualFather, actualHalfChild);
+          addDashedEdge(`e-halfsib-alone-f-${personId}-${halfChild.id}`, selfPos, actualHalfChild);
+        });
+        return;
       }
-    }
 
-    // ── Propres unions de la personne ─────────────────────────────
+      // ── Cas normal : partenaire + union ──────────────────────────
+      const otherUnionId = `u-${fou.union!.id}`;
+      const otherPartnerDesired: [number, number, number] = [
+        fPos[0] - (ouIdx + 1) * 14,
+        fPos[1],
+        fPos[2] + (ouIdx + 1) * 8,
+      ];
+      const actualOtherPartner = addPerson(fou.partner, otherPartnerDesired);
+
+      const otherUnionMid: [number, number, number] = [
+        (fPos[0] + actualOtherPartner[0]) / 2,
+        fPos[1],
+        (fPos[2] + actualOtherPartner[2]) / 2,
+      ];
+      const actualOtherUnionPos = addUnion(otherUnionId, fou.union, otherUnionMid);
+      if (actualFather) addEdge(`e-${otherUnionId}-father`, actualFather, actualOtherUnionPos);
+      addEdge(`e-${otherUnionId}-fpartner`, actualOtherUnionPos, actualOtherPartner);
+
+      fatherHalfChildren.forEach((halfChild, hci) => {
+        knownChildIds.add(halfChild.id);
+        const hSide = hci % 2 === 0 ? 1 : -1;
+        const hDist = Math.ceil((hci + 1) / 2);
+        const halfChildDesired: [number, number, number] = [
+          actualOtherUnionPos[0],
+          actualOtherUnionPos[1] - PARENT_Y,
+          actualOtherUnionPos[2] + hSide * hDist * 8,
+        ];
+        const actualHalfChild = addPerson(halfChild, halfChildDesired);
+        addEdge(`e-halfchild-f-${halfChild.id}-u-${fou.union!.id}`, actualOtherUnionPos, actualHalfChild);
+        addDashedEdge(`e-halfsib-f-${personId}-${halfChild.id}`, selfPos, actualHalfChild);
+      });
+    });
+
+    // ── Propres unions — V vers le bas, enfants encore plus bas ──────
+    // Forme : self \  / partner
+    //              \/
+    //           union node
+    //           /   \
+    //        enfant enfant
     const newOwnUnions = data.ownUnions.filter(
       ou => !unionIdsRef.current.has(`u-${ou.union.id}`)
     );
-    const N          = newOwnUnions.length;
-    const RADIUS     = 13;
-    const TOTAL_ARC  = N <= 1 ? 0 : Math.min((N - 1) * 0.65, Math.PI * 0.75);
+    const N         = newOwnUnions.length;
+    const RADIUS    = 13;
+    const TOTAL_ARC = N <= 1 ? 0 : Math.min((N - 1) * 0.65, Math.PI * 0.75);
 
     newOwnUnions.forEach((ou, j) => {
       const unionId = `u-${ou.union.id}`;
       const angle   = N <= 1 ? 0 : -TOTAL_ARC / 2 + j * (TOTAL_ARC / (N - 1));
 
+      // Partenaire au même niveau Y, éventail en XZ
       const partnerDesired: [number, number, number] = [
         selfPos[0] + RADIUS * Math.cos(angle),
         selfPos[1],
@@ -528,18 +521,29 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
       ];
       const actualPartner = addPerson(ou.partner, partnerDesired);
 
-      const midPos: [number, number, number] = [
+      // Nœud d'union EN DESSOUS des deux → forme un V
+      const unionPos: [number, number, number] = [
         (selfPos[0] + actualPartner[0]) / 2,
-        selfPos[1],
+        selfPos[1] - UNION_Y,
         (selfPos[2] + actualPartner[2]) / 2,
       ];
-      const actualUnionPos = addUnion(unionId, ou.union, midPos);
-      addEdge(`e-${unionId}-self`,    selfPos,          actualUnionPos);
-      addEdge(`e-${unionId}-partner`, actualUnionPos,   actualPartner);
-    });
+      const actualUnionPos = addUnion(unionId, ou.union, unionPos);
+      addEdge(`e-${unionId}-self`,    selfPos,       actualUnionPos);
+      addEdge(`e-${unionId}-partner`, actualPartner, actualUnionPos);
 
-    // ── Unions existantes : pas d'enfants dans ownUnions de l'API actuelle
-    // (l'API retourne { union, partner } sans children dans ownUnions)
+      // Enfants de cette union, une génération plus bas
+      (ou.children ?? []).forEach((child, k) => {
+        const kSide = k % 2 === 0 ? 1 : -1;
+        const kDist = Math.ceil((k + 1) / 2);
+        const childDesired: [number, number, number] = [
+          actualUnionPos[0],
+          selfPos[1] - PARENT_Y,
+          actualUnionPos[2] + kSide * kDist * 8,
+        ];
+        const actualChild = addPerson(child, childDesired);
+        addEdge(`e-child-${child.id}-${unionId}`, actualUnionPos, actualChild);
+      });
+    });
 
     if (newPersons.length > 0) setPersons(prev => [...prev, ...newPersons]);
     if (newUnions.length  > 0) setUnions(prev  => [...prev, ...newUnions]);

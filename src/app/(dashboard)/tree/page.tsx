@@ -54,6 +54,7 @@ export default function TreePage() {
     { picto: "💍",  label: "Marié·e" },
     { picto: "💍✗", label: "Divorcé·e" },
     { picto: "†",   label: "Décédé·e" },
+    { picto: "- -", label: "Demi-fratrie" },
   ];
 
   return (
@@ -69,7 +70,15 @@ export default function TreePage() {
               {label}
             </span>
           ))}
-          <div className="mt-4 pt-3 border-t border-gray-100 space-y-1 text-xs text-gray-400">
+          <div className="mt-4 pt-3 border-t border-gray-100 space-y-2 text-xs text-gray-400">
+            <p className="flex items-center gap-1.5">
+              <span className="inline-flex gap-0.5">
+                <span className="w-3 h-3 rounded-full bg-blue-400 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-emerald-400 inline-block" />
+                <span className="w-3 h-3 rounded-full bg-rose-400 inline-block" />
+              </span>
+              Couleur = lignée (nom de famille)
+            </p>
             <p>Clic → info + expand</p>
             <p>Drag → rotation</p>
             <p>Scroll → zoom</p>
