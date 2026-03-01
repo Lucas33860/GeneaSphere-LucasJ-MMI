@@ -21,16 +21,11 @@ export interface Member {
   photo_url: string | null;
   bio: string | null;
   is_private: boolean;
+  father_id: string | null;
+  mother_id: string | null;
   created_by: string;
   created_at: string;
   updated_at: string;
-}
-
-export interface Parentage {
-  id: string;
-  child_id: string;
-  father_id: string | null;
-  mother_id: string | null;
 }
 
 export interface Spouse {

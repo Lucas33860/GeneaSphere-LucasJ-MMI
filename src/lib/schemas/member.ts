@@ -9,6 +9,8 @@ export const memberSchema = z.object({
   birth_place: z.string().max(200).nullable().optional(),
   bio: z.string().max(5000).nullable().optional(),
   is_private: z.boolean().optional().default(false),
+  father_id: z.string().uuid().nullable().optional(),
+  mother_id: z.string().uuid().nullable().optional(),
 });
 
 export type MemberInput = z.infer<typeof memberSchema>;

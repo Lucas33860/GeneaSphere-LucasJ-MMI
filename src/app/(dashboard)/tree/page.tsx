@@ -54,7 +54,6 @@ export default function TreePage() {
     { picto: "💍",  label: "Marié·e" },
     { picto: "💍✗", label: "Divorcé·e" },
     { picto: "†",   label: "Décédé·e" },
-    { picto: "- -", label: "Demi-fratrie" },
   ];
 
   return (

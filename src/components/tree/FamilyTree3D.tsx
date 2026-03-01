@@ -180,10 +180,6 @@ function Edge({ edge }: { edge: GraphEdge }) {
   return <Line points={[edge.from, edge.to]} color="#475569" lineWidth={1.5} />;
 }
 
-// ── Dashed Edge (demi-frères/sœurs) ──────────────────────────────
-function DashedEdge({ edge }: { edge: GraphEdge }) {
-  return <Line points={[edge.from, edge.to]} color="#94a3b8" lineWidth={1.2} dashed dashSize={0.5} gapSize={0.3} />;
-}
 
 // ── Camera focus (lerp vers la cible) ────────────────────────────
 function CameraFocusController({ targetRef }: { targetRef: React.RefObject<THREE.Vector3 | null> }) {
@@ -221,7 +217,6 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
   const [persons, setPersons] = useState<GraphPerson[]>([]);
   const [unions,  setUnions]  = useState<GraphUnion[]>([]);
   const [edges,   setEdges]   = useState<GraphEdge[]>([]);
-  const [dashedEdges, setDashedEdges] = useState<GraphEdge[]>([]);
   const [cameraReset, setCameraReset] = useState(0);
 
   const expandedRef    = useRef<Set<string>>(new Set());
@@ -236,7 +231,7 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
   const focusTargetRef = useRef<THREE.Vector3 | null>(null);
 
   useEffect(() => {
-    setPersons([]); setUnions([]); setEdges([]); setDashedEdges([]);
+    setPersons([]); setUnions([]); setEdges([]);
     expandedRef.current    = new Set();
     personIdsRef.current   = new Set();
     unionIdsRef.current    = new Set();
@@ -261,7 +256,6 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
     const newPersons: GraphPerson[] = [];
     const newUnions:  GraphUnion[]  = [];
     const newEdges:   GraphEdge[]   = [];
-    const newDashedEdges: GraphEdge[] = [];
 
     const addPerson = (m: Member, desired: [number, number, number]): [number, number, number] => {
       if (personIdsRef.current.has(m.id)) {
@@ -293,12 +287,6 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
       if (edgeIdsRef.current.has(id)) return;
       edgeIdsRef.current.add(id);
       newEdges.push({ id, from, to });
-    };
-
-    const addDashedEdge = (id: string, from: [number, number, number], to: [number, number, number]) => {
-      if (edgeIdsRef.current.has(id)) return;
-      edgeIdsRef.current.add(id);
-      newDashedEdges.push({ id, from, to });
     };
 
     // ── Position réelle de la personne courante ───────────────────
@@ -401,15 +389,15 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
           ];
           const actualHalfChild = addPerson(halfChild, desired);
           if (actualMother) addEdge(`e-alone-m-${halfChild.id}`, actualMother, actualHalfChild);
-          addDashedEdge(`e-halfsib-alone-m-${personId}-${halfChild.id}`, selfPos, actualHalfChild);
         });
         return;
       }
 
       // ── Cas normal : partenaire + union ──────────────────────────
       const otherUnionId = `u-${mou.union!.id}`;
+      const mSide = ouIdx % 2 === 0 ? 1 : -1; // alternance gauche/droite
       const otherPartnerDesired: [number, number, number] = [
-        motherPos[0] + (ouIdx + 1) * 14,
+        motherPos[0] + mSide * (ouIdx + 1) * 14,
         motherPos[1],
         motherPos[2] + (ouIdx + 1) * 8,
       ];
@@ -417,7 +405,7 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
 
       const otherUnionMid: [number, number, number] = [
         (motherPos[0] + actualOtherPartner[0]) / 2,
-        motherPos[1],
+        motherPos[1] - UNION_Y, // en dessous des deux → forme un V
         (motherPos[2] + actualOtherPartner[2]) / 2,
       ];
       const actualOtherUnionPos = addUnion(otherUnionId, mou.union, otherUnionMid);
@@ -435,7 +423,6 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
         ];
         const actualHalfChild = addPerson(halfChild, halfChildDesired);
         addEdge(`e-halfchild-${halfChild.id}-union-${mou.union!.id}`, actualOtherUnionPos, actualHalfChild);
-        addDashedEdge(`e-halfsib-${personId}-${halfChild.id}`, selfPos, actualHalfChild);
       });
     });
 
@@ -458,15 +445,15 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
           ];
           const actualHalfChild = addPerson(halfChild, desired);
           if (actualFather) addEdge(`e-alone-f-${halfChild.id}`, actualFather, actualHalfChild);
-          addDashedEdge(`e-halfsib-alone-f-${personId}-${halfChild.id}`, selfPos, actualHalfChild);
         });
         return;
       }
 
       // ── Cas normal : partenaire + union ──────────────────────────
       const otherUnionId = `u-${fou.union!.id}`;
+      const fSide = ouIdx % 2 === 0 ? -1 : 1; // alternance gauche/droite
       const otherPartnerDesired: [number, number, number] = [
-        fPos[0] - (ouIdx + 1) * 14,
+        fPos[0] + fSide * (ouIdx + 1) * 14,
         fPos[1],
         fPos[2] + (ouIdx + 1) * 8,
       ];
@@ -474,7 +461,7 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
 
       const otherUnionMid: [number, number, number] = [
         (fPos[0] + actualOtherPartner[0]) / 2,
-        fPos[1],
+        fPos[1] - UNION_Y, // en dessous des deux → forme un V
         (fPos[2] + actualOtherPartner[2]) / 2,
       ];
       const actualOtherUnionPos = addUnion(otherUnionId, fou.union, otherUnionMid);
@@ -492,7 +479,6 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
         ];
         const actualHalfChild = addPerson(halfChild, halfChildDesired);
         addEdge(`e-halfchild-f-${halfChild.id}-u-${fou.union!.id}`, actualOtherUnionPos, actualHalfChild);
-        addDashedEdge(`e-halfsib-f-${personId}-${halfChild.id}`, selfPos, actualHalfChild);
       });
     });
 
@@ -505,15 +491,14 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
     const newOwnUnions = data.ownUnions.filter(
       ou => !unionIdsRef.current.has(`u-${ou.union.id}`)
     );
-    const N         = newOwnUnions.length;
-    const RADIUS    = 13;
-    const TOTAL_ARC = N <= 1 ? 0 : Math.min((N - 1) * 0.65, Math.PI * 0.75);
+    const RADIUS = 13;
+    const N = newOwnUnions.length;
 
     newOwnUnions.forEach((ou, j) => {
       const unionId = `u-${ou.union.id}`;
-      const angle   = N <= 1 ? 0 : -TOTAL_ARC / 2 + j * (TOTAL_ARC / (N - 1));
+      // Répartition uniforme en cercle : N=1→droite, N=2→gauche/droite, N=3→triangle, etc.
+      const angle = (2 * Math.PI / Math.max(N, 1)) * j;
 
-      // Partenaire au même niveau Y, éventail en XZ
       const partnerDesired: [number, number, number] = [
         selfPos[0] + RADIUS * Math.cos(angle),
         selfPos[1],
@@ -548,7 +533,6 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
     if (newPersons.length > 0) setPersons(prev => [...prev, ...newPersons]);
     if (newUnions.length  > 0) setUnions(prev  => [...prev, ...newUnions]);
     if (newEdges.length   > 0) setEdges(prev   => [...prev, ...newEdges]);
-    if (newDashedEdges.length > 0) setDashedEdges(prev => [...prev, ...newDashedEdges]);
   }, []);
 
   useEffect(() => {
@@ -577,9 +561,8 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
 
       <OrbitControls makeDefault enableDamping dampingFactor={0.06} />
 
-      {edges.map(e        => <Edge        key={e.id} edge={e} />)}
-      {dashedEdges.map(e  => <DashedEdge  key={e.id} edge={e} />)}
-      {unions.map(u       => <UnionSphere key={u.id} node={u} />)}
+      {edges.map(e   => <Edge        key={e.id} edge={e} />)}
+      {unions.map(u  => <UnionSphere key={u.id} node={u} />)}
       {persons.map(p      => <PersonSphere key={p.id} node={p} onClick={handleClickPerson} />)}
     </Canvas>
   );
