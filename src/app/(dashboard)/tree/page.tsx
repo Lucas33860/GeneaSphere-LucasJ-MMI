@@ -6,8 +6,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { FamilyTree3D } from "@/components/tree/FamilyTree3D";
 import type { Member, Spouse } from "@/types";
-import { inputCls } from "@/lib/ui";
-import { createClient } from "@/lib/supabase/client";
+import { darkInputCls } from "@/lib/ui";
+import { uploadMemberPhoto } from "@/lib/supabase/storage";
+import { type UnionState4, UNION_STATE_OPTIONS, stateToBody, unionToState4 } from "@/lib/union";
 
 // ── Schemas ───────────────────────────────────────────────────────
 const editMemberSchema = z.object({
@@ -27,6 +28,9 @@ export default function TreePage() {
   const [selectedId, setSelectedId] = useState<string>("");
   const [memberError, setMemberError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [resetKey, setResetKey]       = useState(0);
+  const [importStatus, setImportStatus] = useState<{ type: "ok" | "err" | "loading"; msg: string } | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
   const [panel, setPanel] = useState<
     { type: "member"; data: Member; editing: boolean } |
@@ -46,6 +50,52 @@ export default function TreePage() {
 
   const handleSelectMember = (m: Member) => setPanel({ type: "member", data: m, editing: false });
   const handleSelectUnion  = (u: Spouse) => setPanel({ type: "union",  data: u, editing: false });
+
+  const handleExport = async () => {
+    const res = await fetch("/api/tree/export");
+    if (!res.ok) return;
+    const json = await res.json();
+    const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `geneasphere-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportStatus({ type: "loading", msg: "Import en cours…" });
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      const res = await fetch("/api/tree/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setImportStatus({ type: "err", msg: data.error ?? "Erreur lors de l'import" });
+      } else {
+        setImportStatus({ type: "ok", msg: `${data.members_created} membres + ${data.spouses_created} unions importés.` });
+        // Recharger la liste des membres
+        const memRes = await fetch("/api/members");
+        if (memRes.ok) {
+          const updated: Member[] = await memRes.json();
+          setMembers(updated);
+          if (updated.length > 0 && !selectedId) setSelectedId(updated[0].id);
+        }
+        setResetKey(k => k + 1);
+      }
+    } catch {
+      setImportStatus({ type: "err", msg: "Fichier JSON invalide." });
+    }
+    if (importRef.current) importRef.current.value = "";
+    setTimeout(() => setImportStatus(null), 5000);
+  };
 
   const legendItems = [
     { picto: "♥",   label: "Couple",     color: "text-pink-400" },
@@ -83,7 +133,7 @@ export default function TreePage() {
           </p>
         )}
 
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-2">
           {/* Légende inline petite */}
           <div className="hidden lg:flex items-center gap-3">
             {legendItems.map(({ picto, label, color }) => (
@@ -104,6 +154,42 @@ export default function TreePage() {
             <span>🔍 Scroll = zoom</span>
             <span>Clic = info</span>
           </div>
+
+          {/* Séparateur */}
+          <div className="w-px h-5 bg-white/10 mx-1" />
+
+          {/* Reset arbre */}
+          <button
+            title="Réinitialiser l'arbre (effacer toutes les branches ouvertes)"
+            onClick={() => { setResetKey(k => k + 1); setPanel(null); }}
+            className="text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-sm transition-colors"
+          >
+            🔄
+          </button>
+
+          {/* Export JSON */}
+          <button
+            title="Exporter l'arbre en JSON"
+            onClick={handleExport}
+            className="text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-sm transition-colors"
+          >
+            📤
+          </button>
+
+          {/* Import JSON */}
+          <label
+            title="Importer un arbre depuis un fichier JSON"
+            className="cursor-pointer text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-sm transition-colors"
+          >
+            📥
+            <input
+              ref={importRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImport}
+            />
+          </label>
         </div>
       </div>
 
@@ -111,9 +197,22 @@ export default function TreePage() {
       <div className="flex-1 relative overflow-hidden">
 
         {/* Canvas 3D */}
+        {/* Notification import */}
+        {importStatus && (
+          <div className={`absolute top-3 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-xl text-sm font-medium shadow-lg border ${
+            importStatus.type === "ok"      ? "bg-emerald-900/90 text-emerald-300 border-emerald-700" :
+            importStatus.type === "err"     ? "bg-red-900/90 text-red-300 border-red-700" :
+                                              "bg-slate-800/90 text-slate-300 border-white/10"
+          }`}>
+            {importStatus.type === "loading" ? "⏳ " : importStatus.type === "ok" ? "✓ " : "✕ "}
+            {importStatus.msg}
+          </div>
+        )}
+
         {selectedId ? (
           <FamilyTree3D
             rootId={selectedId}
+            resetKey={resetKey}
             onSelectMember={handleSelectMember}
             onSelectUnion={handleSelectUnion}
           />
@@ -338,8 +437,6 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
   const [preview, setPreview] = useState<string | null>(member.photo_url ?? null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const darkInput = "w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500";
-
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<EditMemberInput>({
     resolver: zodResolver(editMemberSchema),
     defaultValues: {
@@ -360,19 +457,8 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
     const file = fileRef.current?.files?.[0];
     if (file) {
       setUploading(true);
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const ext = file.name.split(".").pop() ?? "jpg";
-        const path = `${user.id}/${Date.now()}.${ext}`;
-        const { data: uploaded, error: uploadErr } = await supabase.storage
-          .from("member-photos")
-          .upload(path, file, { upsert: true });
-        if (!uploadErr && uploaded) {
-          const { data: urlData } = supabase.storage.from("member-photos").getPublicUrl(uploaded.path);
-          photoUrl = urlData.publicUrl;
-        }
-      }
+      const uploaded = await uploadMemberPhoto(file);
+      if (uploaded) photoUrl = uploaded;
       setUploading(false);
     }
 
@@ -433,16 +519,16 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
 
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <input {...register("first_name")} placeholder="Prénom" className={darkInput} />
+          <input {...register("first_name")} placeholder="Prénom" className={darkInputCls} />
           {errors.first_name && <p className="text-red-400 text-xs mt-0.5">{errors.first_name.message}</p>}
         </div>
         <div>
-          <input {...register("last_name")} placeholder="Nom" className={darkInput} />
+          <input {...register("last_name")} placeholder="Nom" className={darkInputCls} />
           {errors.last_name && <p className="text-red-400 text-xs mt-0.5">{errors.last_name.message}</p>}
         </div>
       </div>
 
-      <select {...register("gender")} className={darkInput + " [&>option]:bg-slate-800"}>
+      <select {...register("gender")} className={darkInputCls + " [&>option]:bg-slate-800"}>
         <option value="">Genre —</option>
         <option value="male">Homme</option>
         <option value="female">Femme</option>
@@ -452,16 +538,16 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
       <div className="grid grid-cols-2 gap-2">
         <div>
           <p className="text-xs text-slate-500 mb-1">Naissance</p>
-          <input {...register("birth_date")} type="date" className={darkInput} />
+          <input {...register("birth_date")} type="date" className={darkInputCls} />
         </div>
         <div>
           <p className="text-xs text-slate-500 mb-1">Décès</p>
-          <input {...register("death_date")} type="date" className={darkInput} />
+          <input {...register("death_date")} type="date" className={darkInputCls} />
         </div>
       </div>
 
-      <input {...register("birth_place")} placeholder="Lieu de naissance" className={darkInput} />
-      <textarea {...register("bio")} placeholder="Biographie…" rows={2} className={darkInput + " resize-none"} />
+      <input {...register("birth_place")} placeholder="Lieu de naissance" className={darkInputCls} />
+      <textarea {...register("bio")} placeholder="Biographie…" rows={2} className={darkInputCls + " resize-none"} />
 
       <div className="flex gap-2 pt-1">
         <button type="submit" disabled={isSubmitting || uploading}
@@ -477,30 +563,6 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
   );
 }
 
-// ── Union 4 états ─────────────────────────────────────────────────
-type UnionState4 = "couple" | "ex-couple" | "marriage" | "divorce";
-
-const UNION_OPTS: { value: UnionState4; picto: string; label: string; active: string }[] = [
-  { value: "couple",    picto: "♥",   label: "Couple",    active: "bg-pink-600 border-pink-500 text-white" },
-  { value: "ex-couple", picto: "💔",  label: "Ex-couple", active: "bg-slate-600 border-slate-500 text-white" },
-  { value: "marriage",  picto: "💍",  label: "Marié·e",   active: "bg-amber-600 border-amber-500 text-white" },
-  { value: "divorce",   picto: "💍✗", label: "Divorcé·e", active: "bg-slate-700 border-slate-600 text-white" },
-];
-
-function unionToState4(u: Spouse): UnionState4 {
-  if (u.union_type === "couple") return u.separation_date ? "ex-couple" : "couple";
-  return u.separation_date ? "divorce" : "marriage";
-}
-
-function stateToBody(state: UnionState4, date: string) {
-  const isSep = state === "ex-couple" || state === "divorce";
-  return {
-    union_type:      state === "couple" || state === "ex-couple" ? "couple" : "marriage",
-    union_date:      !isSep ? (date || null) : null,
-    separation_date: isSep  ? (date || null) : null,
-  };
-}
-
 // ── Formulaire édition union ──────────────────────────────────────
 function EditUnionForm({ union, onCancel, onSuccess }: { union: Spouse; onCancel: () => void; onSuccess: (u: Spouse) => void }) {
   const [state, setState] = useState<UnionState4>(unionToState4(union));
@@ -510,8 +572,6 @@ function EditUnionForm({ union, onCancel, onSuccess }: { union: Spouse; onCancel
   const { register, handleSubmit, formState: { isSubmitting } } = useForm({
     defaultValues: { date: (isSep ? union.separation_date : union.union_date)?.slice(0, 10) ?? "" },
   });
-
-  const darkInput = "w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
   const onSubmit = async (data: { date: string }) => {
     setSaveError(null);
@@ -532,7 +592,7 @@ function EditUnionForm({ union, onCancel, onSuccess }: { union: Spouse; onCancel
       {saveError && <p className="text-red-400 text-xs bg-red-900/30 px-3 py-2 rounded-lg">{saveError}</p>}
 
       <div className="grid grid-cols-2 gap-2">
-        {UNION_OPTS.map(opt => (
+        {UNION_STATE_OPTIONS.map(opt => (
           <button key={opt.value} type="button" onClick={() => setState(opt.value)}
             className={`flex flex-col items-center py-2.5 rounded-xl border transition-all text-xs font-semibold ${
               state === opt.value ? opt.active : "bg-white/5 border-white/10 text-slate-400 hover:bg-white/10"
@@ -545,7 +605,7 @@ function EditUnionForm({ union, onCancel, onSuccess }: { union: Spouse; onCancel
 
       <div>
         <p className="text-xs text-slate-500 mb-1">{isSep ? "Date de séparation" : "Date de début"} (optionnel)</p>
-        <input {...register("date")} type="date" className={darkInput} />
+        <input {...register("date")} type="date" className={darkInputCls} />
       </div>
 
       <div className="flex gap-2">

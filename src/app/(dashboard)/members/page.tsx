@@ -6,7 +6,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import type { Member } from "@/types";
 import { inputCls } from "@/lib/ui";
-import { createClient } from "@/lib/supabase/client";
+import { uploadMemberPhoto } from "@/lib/supabase/storage";
+import { type UnionState4, UNION_STATE_OPTIONS, stateToBody } from "@/lib/union";
+import { UnionStateSelector } from "@/components/union/UnionStateSelector";
+import { MemberCard } from "@/components/members/MemberCard";
 
 // ── Schemas ───────────────────────────────────────────────────────
 const addMemberSchema = z.object({
@@ -21,12 +24,19 @@ const addMemberSchema = z.object({
 });
 type AddMemberInput = z.infer<typeof addMemberSchema>;
 
-const unionSchema = z.object({
-  member1_id: z.string().min(1, "Sélectionnez le 1er membre"),
-  member2_id: z.string().min(1, "Sélectionnez le 2ème membre"),
-  union_date: z.string().optional(),
+const editMemberSchema = z.object({
+  first_name:  z.string().min(1, "Requis"),
+  last_name:   z.string().min(1, "Requis"),
+  gender:      z.enum(["male", "female", "other", ""]).optional(),
+  birth_date:  z.string().optional(),
+  birth_place: z.string().optional(),
+  death_date:  z.string().optional(),
+  bio:         z.string().optional(),
+  father_id:   z.string().optional(),
+  mother_id:   z.string().optional(),
+  is_private:  z.boolean().optional(),
 });
-type UnionInput = z.infer<typeof unionSchema>;
+type EditMemberInput = z.infer<typeof editMemberSchema>;
 
 type Panel = "add" | "union" | null;
 
@@ -37,6 +47,7 @@ export default function MembersPage() {
   const [panel, setPanel] = useState<Panel>(null);
   const [search, setSearch] = useState("");
   const [feedback, setFeedback] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
+  const [selectedMember, setSelectedMember] = useState<Member | null>(null);
 
   const notify = (type: "ok" | "err", msg: string) => {
     setFeedback({ type, msg });
@@ -169,19 +180,31 @@ export default function MembersPage() {
               <MemberCard
                 key={m.id}
                 member={m}
-                members={members}
-                onUpdate={fetchMembers}
-                onDelete={async () => {
-                  if (!confirm(`Supprimer ${m.first_name} ${m.last_name} ?`)) return;
-                  const res = await fetch(`/api/members/${m.id}`, { method: "DELETE" });
-                  if (res.ok) { notify("ok", "Membre supprimé."); fetchMembers(); }
-                  else notify("err", "Erreur lors de la suppression");
-                }}
+                onClick={() => setSelectedMember(m)}
               />
             ))}
           </div>
         )}
       </div>
+
+      {/* Modal édition complète */}
+      {selectedMember && (
+        <EditMemberModal
+          member={selectedMember}
+          members={members}
+          onClose={() => setSelectedMember(null)}
+          onSaved={() => {
+            notify("ok", "Modifications enregistrées.");
+            fetchMembers();
+            setSelectedMember(null);
+          }}
+          onDeleted={() => {
+            notify("ok", "Membre supprimé.");
+            fetchMembers();
+            setSelectedMember(null);
+          }}
+        />
+      )}
     </main>
   );
 }
@@ -209,127 +232,224 @@ function Field({ label, error, children }: { label: string; error?: string; chil
   );
 }
 
-// ── Carte membre ──────────────────────────────────────────────────
-function MemberCard({ member, members, onUpdate, onDelete }: { member: Member; members: Member[]; onUpdate: () => void; onDelete: () => void }) {
-  const [editingParents, setEditingParents] = useState(false);
-  const [fatherId, setFatherId] = useState(member.father_id ?? "");
-  const [motherId, setMotherId] = useState(member.mother_id ?? "");
-  const [saving, setSaving] = useState(false);
+// ── Modal édition complète d'un membre ───────────────────────────
+function EditMemberModal({ member, members, onClose, onSaved, onDeleted }: {
+  member: Member;
+  members: Member[];
+  onClose: () => void;
+  onSaved: () => void;
+  onDeleted: () => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(member.photo_url);
+  const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const genderIcon: Record<string, string> = { male: "♂", female: "♀", other: "⚥" };
-  const father = members.find(m => m.id === member.father_id);
-  const mother = members.find(m => m.id === member.mother_id);
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<EditMemberInput>({
+    resolver: zodResolver(editMemberSchema),
+    defaultValues: {
+      first_name:  member.first_name,
+      last_name:   member.last_name,
+      gender:      member.gender ?? "",
+      birth_date:  member.birth_date ?? "",
+      birth_place: member.birth_place ?? "",
+      death_date:  member.death_date ?? "",
+      bio:         member.bio ?? "",
+      father_id:   member.father_id ?? "",
+      mother_id:   member.mother_id ?? "",
+      is_private:  member.is_private,
+    },
+  });
 
-  const age = member.birth_date
-    ? (member.death_date
-        ? new Date(member.death_date).getFullYear() - new Date(member.birth_date).getFullYear()
-        : new Date().getFullYear() - new Date(member.birth_date).getFullYear())
-    : null;
+  const onSubmit = async (data: EditMemberInput) => {
+    setSaveError(null);
+    let photoUrl = member.photo_url;
 
-  const saveParents = async () => {
-    setSaving(true);
-    await fetch(`/api/members/${member.id}`, {
+    const file = fileRef.current?.files?.[0];
+    if (file) {
+      setUploading(true);
+      const uploaded = await uploadMemberPhoto(file);
+      if (uploaded) photoUrl = uploaded;
+      setUploading(false);
+    }
+
+    const body = {
+      ...data,
+      gender:      data.gender      || null,
+      birth_date:  data.birth_date  || null,
+      birth_place: data.birth_place || null,
+      death_date:  data.death_date  || null,
+      bio:         data.bio         || null,
+      father_id:   data.father_id   || null,
+      mother_id:   data.mother_id   || null,
+      is_private:  data.is_private  ?? false,
+      photo_url:   photoUrl,
+    };
+
+    const res = await fetch(`/api/members/${member.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ father_id: fatherId || null, mother_id: motherId || null }),
+      body: JSON.stringify(body),
     });
-    setSaving(false);
-    setEditingParents(false);
-    onUpdate();
+    if (res.ok) {
+      onSaved();
+    } else {
+      const json = await res.json().catch(() => ({}));
+      setSaveError(json.error ?? "Erreur lors de la sauvegarde");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Supprimer définitivement ${member.first_name} ${member.last_name} ?`)) return;
+    setDeleting(true);
+    const res = await fetch(`/api/members/${member.id}`, { method: "DELETE" });
+    setDeleting(false);
+    if (res.ok) onDeleted();
   };
 
   return (
-    <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-      {/* Header de la carte */}
-      <div className="px-4 pt-4 pb-3 flex items-center gap-3">
-        <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-lg shrink-0 overflow-hidden border-2 border-white shadow-sm">
-          {member.photo_url
-            ? <img src={member.photo_url} alt={member.first_name} className="w-full h-full object-cover" />
-            : <>{member.first_name[0]}{member.last_name[0]}</>
-          }
-        </div>
-        <div className="flex-1 min-w-0">
-          <p className="font-bold text-slate-900 truncate">
-            {member.first_name} {member.last_name.toUpperCase()}
-          </p>
-          <p className="text-xs text-slate-400">
-            {member.gender ? genderIcon[member.gender] : ""}
-            {age != null ? ` · ${age} ans` : ""}
-            {member.death_date ? " · †" : ""}
-          </p>
-        </div>
-        {member.is_private && (
-          <span className="text-xs bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 rounded-lg shrink-0">Privé</span>
-        )}
-      </div>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
 
-      {/* Infos */}
-      <div className="px-4 pb-3 space-y-1">
-        {member.birth_date && (
-          <p className="text-xs text-slate-400">
-            🎂 {new Date(member.birth_date).toLocaleDateString("fr-FR")}
-            {member.birth_place ? ` — ${member.birth_place}` : ""}
-          </p>
-        )}
-        {member.death_date && (
-          <p className="text-xs text-slate-400">🕊️ {new Date(member.death_date).toLocaleDateString("fr-FR")}</p>
-        )}
-        {(father || mother) && !editingParents && (
-          <p className="text-xs text-slate-400 truncate">
-            {father && `👨 ${father.first_name} ${father.last_name}`}
-            {father && mother && " · "}
-            {mother && `👩 ${mother.first_name} ${mother.last_name}`}
-          </p>
-        )}
-      </div>
-
-      {/* Édition parents */}
-      {editingParents && (
-        <div className="border-t border-slate-100 px-4 py-3 bg-slate-50 space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1">Père</label>
-              <select value={fatherId} onChange={e => setFatherId(e.target.value)} className={inputCls}>
-                <option value="">— Aucun —</option>
-                {members.filter(m => m.id !== member.id).map(m => (
-                  <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1">Mère</label>
-              <select value={motherId} onChange={e => setMotherId(e.target.value)} className={inputCls}>
-                <option value="">— Aucune —</option>
-                {members.filter(m => m.id !== member.id).map(m => (
-                  <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
-                ))}
-              </select>
+        {/* Header photo */}
+        <div className="relative h-28 bg-linear-to-br from-indigo-600 to-blue-500 rounded-t-2xl overflow-hidden">
+          {preview && <img src={preview} alt="" className="w-full h-full object-cover opacity-60" />}
+          <button
+            onClick={onClose}
+            className="absolute top-3 right-3 w-8 h-8 bg-black/30 hover:bg-black/50 text-white rounded-full flex items-center justify-center text-sm font-bold"
+          >
+            ✕
+          </button>
+          {/* Avatar */}
+          <div className="absolute -bottom-8 left-6">
+            <div className="w-16 h-16 rounded-full border-4 border-white bg-indigo-100 overflow-hidden shadow-md">
+              {preview
+                ? <img src={preview} alt="" className="w-full h-full object-cover" />
+                : <div className="w-full h-full flex items-center justify-center text-indigo-600 font-bold text-xl">
+                    {member.first_name[0]}{member.last_name[0]}
+                  </div>
+              }
             </div>
           </div>
-          <button
-            onClick={saveParents}
-            disabled={saving}
-            className="w-full bg-indigo-600 text-white py-1.5 rounded-lg text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {saving ? "Sauvegarde…" : "Enregistrer"}
-          </button>
         </div>
-      )}
 
-      {/* Actions */}
-      <div className="border-t border-slate-100 px-4 py-2 flex items-center justify-between">
-        <button
-          onClick={() => setEditingParents(p => !p)}
-          className="text-xs text-indigo-500 hover:text-indigo-700 font-medium"
-        >
-          {editingParents ? "Annuler" : "⊕ Parents"}
-        </button>
-        <button
-          onClick={onDelete}
-          className="text-xs text-red-400 hover:text-red-600 font-medium"
-        >
-          Supprimer
-        </button>
+        <div className="pt-12 px-6 pb-6 space-y-5">
+
+          {/* Photo upload */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Changer la photo</label>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                setPreview(f ? URL.createObjectURL(f) : member.photo_url);
+              }}
+              className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+            />
+          </div>
+
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            {saveError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-2">✕ {saveError}</p>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Prénom *" error={errors.first_name?.message}>
+                <input {...register("first_name")} className={inputCls} />
+              </Field>
+              <Field label="Nom *" error={errors.last_name?.message}>
+                <input {...register("last_name")} className={inputCls} />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Genre">
+                <select {...register("gender")} className={inputCls}>
+                  <option value="">—</option>
+                  <option value="male">Homme</option>
+                  <option value="female">Femme</option>
+                  <option value="other">Autre</option>
+                </select>
+              </Field>
+              <Field label="Date de naissance">
+                <input {...register("birth_date")} type="date" className={inputCls} />
+              </Field>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Lieu de naissance">
+                <input {...register("birth_place")} placeholder="Paris" className={inputCls} />
+              </Field>
+              <Field label="Date de décès">
+                <input {...register("death_date")} type="date" className={inputCls} />
+              </Field>
+            </div>
+
+            <Field label="Biographie">
+              <textarea {...register("bio")} rows={3} placeholder="Quelques mots…" className={`${inputCls} resize-none`} />
+            </Field>
+
+            <div className="border-t border-slate-100 pt-4 space-y-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Parents</p>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Père">
+                  <select {...register("father_id")} className={inputCls}>
+                    <option value="">— Aucun —</option>
+                    {members.filter(m => m.id !== member.id).map(m => (
+                      <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="Mère">
+                  <select {...register("mother_id")} className={inputCls}>
+                    <option value="">— Aucune —</option>
+                    {members.filter(m => m.id !== member.id).map(m => (
+                      <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="is_private" {...register("is_private")} className="rounded accent-indigo-600" />
+              <label htmlFor="is_private" className="text-sm text-slate-600">Profil privé</label>
+            </div>
+
+            <div className="border-t border-slate-100 pt-4 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="text-sm text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+              >
+                {deleting ? "Suppression…" : "🗑 Supprimer"}
+              </button>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 font-medium"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || uploading}
+                  className="px-5 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                >
+                  {uploading ? "Upload…" : isSubmitting ? "Sauvegarde…" : "Enregistrer"}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   );
@@ -354,19 +474,8 @@ function AddMemberForm({ members, onSuccess, onError }: {
     const file = fileRef.current?.files?.[0];
     if (file) {
       setUploading(true);
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const ext = file.name.split(".").pop() ?? "jpg";
-        const path = `${user.id}/${Date.now()}.${ext}`;
-        const { data: uploaded, error: uploadErr } = await supabase.storage
-          .from("member-photos")
-          .upload(path, file, { upsert: true });
-        if (!uploadErr && uploaded) {
-          const { data: urlData } = supabase.storage.from("member-photos").getPublicUrl(uploaded.path);
-          photoUrl = urlData.publicUrl;
-        }
-      }
+      const uploaded = await uploadMemberPhoto(file);
+      if (uploaded) photoUrl = uploaded;
       setUploading(false);
     }
 
@@ -492,64 +601,88 @@ function UnionForm({ members, onSuccess, onError }: {
   onSuccess: () => void;
   onError: (m: string) => void;
 }) {
-  const [statut, setStatut] = useState<"ensemble" | "séparé">("ensemble");
-  const { register, handleSubmit, formState: { errors, isSubmitting }, reset } = useForm<UnionInput>({
-    resolver: zodResolver(unionSchema),
+  const [state, setState] = useState<UnionState4 | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const { register, handleSubmit, reset, watch } = useForm({
+    defaultValues: { member1_id: "", member2_id: "", date: "" },
   });
+  const m1 = watch("member1_id");
+  const m2 = watch("member2_id");
+  const isSep = state === "ex-couple" || state === "divorce";
 
-  const onSubmit = async (data: UnionInput) => {
-    const body = {
-      type: "spouse",
-      member1_id: data.member1_id,
-      member2_id: data.member2_id,
-      union_date:      statut === "ensemble" ? (data.union_date || null) : null,
-      separation_date: statut === "séparé"   ? (data.union_date || null) : null,
-    };
+  const onSubmit = async (data: { member1_id: string; member2_id: string; date: string }) => {
+    if (!data.member1_id || !data.member2_id) { onError("Sélectionnez 2 membres."); return; }
+    if (data.member1_id === data.member2_id) { onError("Les deux membres doivent être différents."); return; }
+    if (!state) { onError("Choisissez un état d'union."); return; }
+    setSubmitting(true);
     const res = await fetch("/api/relations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({ type: "spouse", member1_id: data.member1_id, member2_id: data.member2_id, ...stateToBody(state, data.date) }),
     });
+    setSubmitting(false);
     if (!res.ok) { onError((await res.json()).error ?? "Erreur"); return; }
     reset();
+    setState(null);
     onSuccess();
   };
 
+  const selectedOpt = UNION_STATE_OPTIONS.find(o => o.value === state);
+  const name1 = members.find(m => m.id === m1)?.first_name;
+  const name2 = members.find(m => m.id === m2)?.first_name;
+
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
-      <h2 className="font-bold text-slate-900 text-lg">Créer une union</h2>
+      <h2 className="font-bold text-slate-900 text-lg">Nouvelle union</h2>
 
-      <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
-        {(["ensemble", "séparé"] as const).map(s => (
-          <button key={s} type="button" onClick={() => setStatut(s)}
-            className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
-              statut === s
-                ? s === "ensemble" ? "bg-pink-500 text-white shadow-sm" : "bg-slate-500 text-white shadow-sm"
-                : "text-slate-500 hover:text-slate-700"
-            }`}>
-            {s === "ensemble" ? "♥ Ensemble" : "✗ Séparé·e"}
-          </button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
+      {/* Personnes */}
+      <div className="grid grid-cols-2 gap-3">
         {(["member1_id", "member2_id"] as const).map((name, i) => (
-          <Field key={name} label={`Membre ${i + 1} *`} error={errors[name]?.message}>
+          <div key={name}>
+            <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Personne {i + 1}</label>
             <select {...register(name)} className={inputCls}>
-              <option value="">— Sélectionner —</option>
+              <option value="">— Choisir —</option>
               {members.map(m => <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>)}
             </select>
-          </Field>
+          </div>
         ))}
       </div>
+      {m1 && m2 && m1 !== m2 && (
+        <p className="text-sm text-pink-600 font-medium -mt-2">
+          {name1} &amp; {name2}
+        </p>
+      )}
 
-      <Field label={statut === "ensemble" ? "Date de début (optionnel)" : "Date de séparation (optionnel)"}>
-        <input {...register("union_date")} type="date" className={inputCls} />
-      </Field>
+      {/* État de l'union */}
+      <div>
+        <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">État de l&apos;union</p>
+        <UnionStateSelector value={state} onChange={setState} />
+      </div>
 
-      <button type="submit" disabled={isSubmitting}
-        className="w-full bg-pink-500 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-pink-600 disabled:opacity-50 transition-colors">
-        {isSubmitting ? "Enregistrement…" : "Créer l'union"}
+      {/* Date */}
+      {state && (
+        <div>
+          <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">
+            {isSep ? "Date de séparation" : "Date de début"} (optionnel)
+          </label>
+          <input {...register("date")} type="date" className={inputCls} />
+        </div>
+      )}
+
+      {/* Résumé */}
+      {state && m1 && m2 && m1 !== m2 && selectedOpt && (
+        <div className="bg-slate-50 border border-slate-100 rounded-xl px-4 py-2.5 flex items-center gap-2 text-sm text-slate-700">
+          <span className="text-lg">{selectedOpt.picto}</span>
+          <span><strong>{name1}</strong> &amp; <strong>{name2}</strong> — {selectedOpt.label}</span>
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={submitting || !state || !m1 || !m2 || m1 === m2}
+        className="w-full bg-pink-500 hover:bg-pink-600 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+      >
+        {submitting ? "Création…" : "Créer l'union"}
       </button>
     </form>
   );

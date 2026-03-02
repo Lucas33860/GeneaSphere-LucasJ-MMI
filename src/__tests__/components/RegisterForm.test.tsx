@@ -41,11 +41,6 @@ describe("RegisterForm", () => {
     expect(screen.getByRole("button", { name: /Créer mon compte/i })).toBeInTheDocument();
   });
 
-  it("affiche un lien vers la page de connexion", () => {
-    render(<RegisterForm />);
-    expect(screen.getByRole("link", { name: /Se connecter/i })).toHaveAttribute("href", "/login");
-  });
-
   // ── Validation ─────────────────────────────────────────────────
   it("affiche une erreur si le nom est trop court", async () => {
     render(<RegisterForm />);

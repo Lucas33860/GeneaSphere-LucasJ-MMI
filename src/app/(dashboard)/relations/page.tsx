@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import type { Member } from "@/types";
 import { inputCls } from "@/lib/ui";
+import { type UnionState4, UNION_STATE_OPTIONS, stateToBody, unionToState4 } from "@/lib/union";
+import { UnionStateSelector } from "@/components/union/UnionStateSelector";
 
 // ── Types ─────────────────────────────────────────────────────────
 interface MemberSnap { id: string; first_name: string; last_name: string }
@@ -225,29 +227,6 @@ export default function RelationsPage() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-type UnionState4 = "couple" | "ex-couple" | "marriage" | "divorce";
-
-const UNION_STATE_OPTIONS: { value: UnionState4; picto: string; label: string; active: string }[] = [
-  { value: "couple",    picto: "♥",   label: "Couple",    active: "bg-pink-500 border-pink-500 text-white" },
-  { value: "ex-couple", picto: "💔",  label: "Ex-couple", active: "bg-slate-400 border-slate-400 text-white" },
-  { value: "marriage",  picto: "💍",  label: "Marié·e",   active: "bg-amber-500 border-amber-500 text-white" },
-  { value: "divorce",   picto: "💍✗", label: "Divorcé·e", active: "bg-slate-600 border-slate-600 text-white" },
-];
-
-function stateToBody(state: UnionState4, date: string) {
-  const isSep = state === "ex-couple" || state === "divorce";
-  return {
-    union_type:      state === "couple" || state === "ex-couple" ? "couple" : "marriage",
-    union_date:      !isSep ? (date || null) : null,
-    separation_date:  isSep ? (date || null) : null,
-  };
-}
-
-function unionToState4(u: { union_type: string; separation_date: string | null }): UnionState4 {
-  if (u.union_type === "couple") return u.separation_date ? "ex-couple" : "couple";
-  return u.separation_date ? "divorce" : "marriage";
-}
-
 function unionPictoLabel(u: UnionRow) {
   const sep = !!u.separation_date;
   if (u.union_type === "couple") return sep ? { picto: "💔", label: "Ex-couple", bg: "bg-slate-100 text-slate-600" } : { picto: "♥", label: "Couple", bg: "bg-pink-100 text-pink-700" };
@@ -285,25 +264,6 @@ function UnionCard({ union, onEdit, onDelete, deleting }: {
           {deleting ? "…" : "Supprimer"}
         </button>
       </div>
-    </div>
-  );
-}
-
-// ── Sélecteur 4 états ─────────────────────────────────────────────
-function UnionStateSelector({ value, onChange }: { value: UnionState4 | null; onChange: (v: UnionState4) => void }) {
-  return (
-    <div className="grid grid-cols-2 gap-2">
-      {UNION_STATE_OPTIONS.map(opt => (
-        <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
-          className={`flex flex-col items-center gap-0.5 py-3 rounded-xl border-2 font-semibold text-xs transition-all ${
-            value === opt.value
-              ? opt.active + " shadow-sm scale-[1.02]"
-              : "bg-slate-50 border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-white"
-          }`}>
-          <span className="text-xl">{opt.picto}</span>
-          {opt.label}
-        </button>
-      ))}
     </div>
   );
 }

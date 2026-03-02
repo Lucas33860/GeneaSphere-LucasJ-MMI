@@ -14,6 +14,8 @@ const mockMember: Member = {
   photo_url: null,
   bio: null,
   is_private: false,
+  father_id: null,
+  mother_id: null,
   created_by: "user-uuid",
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-01-01T00:00:00Z",

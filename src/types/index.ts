@@ -1,5 +1,3 @@
-export type UserRole = "admin" | "user";
-
 export interface Profile {
   id: string;
   email: string;
@@ -37,17 +35,3 @@ export interface Spouse {
   separation_date: string | null;
 }
 
-export interface Relation {
-  type: "parent" | "child" | "spouse";
-  member: Member;
-}
-
-
-export interface FamilyStats {
-  total_members: number;
-  oldest_member: Member | null;
-  youngest_member: Member | null;
-  average_lifespan: number | null;
-  most_common_first_name: string | null;
-  generations: number;
-}

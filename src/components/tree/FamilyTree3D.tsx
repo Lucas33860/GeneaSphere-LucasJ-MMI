@@ -224,12 +224,13 @@ function CameraReset({ trigger }: { trigger: number }) {
 // ── Props ─────────────────────────────────────────────────────────
 interface FamilyTree3DProps {
   rootId: string;
+  resetKey?: number;
   onSelectMember: (m: Member) => void;
   onSelectUnion?: (u: Spouse) => void;
 }
 
 // ── Composant principal ───────────────────────────────────────────
-export function FamilyTree3D({ rootId, onSelectMember, onSelectUnion }: FamilyTree3DProps) {
+export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }: FamilyTree3DProps) {
   const [persons, setPersons] = useState<GraphPerson[]>([]);
   const [unions,  setUnions]  = useState<GraphUnion[]>([]);
   const [edges,   setEdges]   = useState<GraphEdge[]>([]);
@@ -256,7 +257,8 @@ export function FamilyTree3D({ rootId, onSelectMember, onSelectUnion }: FamilyTr
     personPosRef.current   = new Map();
     unionPosRef.current    = new Map();
     setCameraReset(n => n + 1);
-  }, [rootId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootId, resetKey]);
 
   const expandNode = useCallback(async (
     personId: string,
@@ -388,10 +390,29 @@ export function FamilyTree3D({ rootId, onSelectMember, onSelectUnion }: FamilyTr
     const knownChildIds = new Set<string>([personId]);
     data.siblings.forEach(s => knownChildIds.add(s.id));
 
-    // Cercle autour de la mère — N = nombre d'autres unions avec partenaire
+    // N_total inclut l'union parent → 3 unions = triangle équilatéral (120° d'écart)
     const mouPartnered = motherOtherUnions.filter(mou => mou.partner !== null).length;
-    const N_mou = mouPartnered;
-    const mou_startAngle = (N_mou % 2 === 1 && N_mou > 1) ? Math.PI / 2 : 0;
+    const hasBothParents = !!(actualFather && actualMother);
+    const N_total_mou = mouPartnered + (hasBothParents ? 1 : 0);
+    const mou_startAngle = (N_total_mou % 2 === 1 && N_total_mou > 1) ? Math.PI / 2 : 0;
+
+    // Trouver le slot le plus proche de la direction mère→père
+    let parentSlot_mou = -1;
+    if (hasBothParents && N_total_mou > 1 && actualFather && actualMother) {
+      const dx = actualFather[0] - actualMother[0];
+      const dz = actualFather[2] - actualMother[2];
+      const parentDir = Math.atan2(dz, dx);
+      let minDiff = Infinity;
+      for (let i = 0; i < N_total_mou; i++) {
+        const slotAngle = mou_startAngle + (2 * Math.PI / N_total_mou) * i;
+        const diff = Math.abs(Math.atan2(Math.sin(parentDir - slotAngle), Math.cos(parentDir - slotAngle)));
+        if (diff < minDiff) { minDiff = diff; parentSlot_mou = i; }
+      }
+    }
+
+    // Slots restants pour les autres unions (tout sauf le slot du père)
+    const mou_slots = Array.from({ length: N_total_mou }, (_, i) => i)
+      .filter(i => i !== parentSlot_mou);
     let mou_circleIdx = 0;
 
     motherOtherUnions.forEach((mou) => {
@@ -416,9 +437,10 @@ export function FamilyTree3D({ rootId, onSelectMember, onSelectUnion }: FamilyTr
         return;
       }
 
-      // ── Cas normal : cercle autour de la mère ────────────────────
+      // ── Cas normal : slot du triangle (excluant le slot père) ────
       const otherUnionId = mou.union ? `u-${mou.union.id}` : `mou-partner-${mou.partner!.id}`;
-      const angle = mou_startAngle + (2 * Math.PI / Math.max(N_mou, 1)) * mou_circleIdx;
+      const slotIdx = mou_slots[mou_circleIdx] ?? mou_circleIdx;
+      const angle = mou_startAngle + (2 * Math.PI / Math.max(N_total_mou, 1)) * slotIdx;
       mou_circleIdx++;
 
       const otherPartnerDesired: [number, number, number] = [
@@ -454,10 +476,27 @@ export function FamilyTree3D({ rootId, onSelectMember, onSelectUnion }: FamilyTr
     // ── Demi-frères/sœurs côté père via fatherOtherUnions ───────────
     const fatherOtherUnions = data.fatherOtherUnions ?? [];
 
-    // Cercle autour du père — N = nombre d'autres unions avec partenaire
+    // N_total inclut l'union parent → triangle équilatéral cohérent
     const fouPartnered = fatherOtherUnions.filter(fou => fou.partner !== null).length;
-    const N_fou = fouPartnered;
-    const fou_startAngle = (N_fou % 2 === 1 && N_fou > 1) ? Math.PI / 2 : 0;
+    const N_total_fou = fouPartnered + (hasBothParents ? 1 : 0);
+    const fou_startAngle = (N_total_fou % 2 === 1 && N_total_fou > 1) ? Math.PI / 2 : 0;
+
+    // Trouver le slot le plus proche de la direction père→mère
+    let parentSlot_fou = -1;
+    if (hasBothParents && N_total_fou > 1 && actualFather && actualMother) {
+      const dx = actualMother[0] - actualFather[0];
+      const dz = actualMother[2] - actualFather[2];
+      const parentDir = Math.atan2(dz, dx);
+      let minDiff = Infinity;
+      for (let i = 0; i < N_total_fou; i++) {
+        const slotAngle = fou_startAngle + (2 * Math.PI / N_total_fou) * i;
+        const diff = Math.abs(Math.atan2(Math.sin(parentDir - slotAngle), Math.cos(parentDir - slotAngle)));
+        if (diff < minDiff) { minDiff = diff; parentSlot_fou = i; }
+      }
+    }
+
+    const fou_slots = Array.from({ length: N_total_fou }, (_, i) => i)
+      .filter(i => i !== parentSlot_fou);
     let fou_circleIdx = 0;
 
     fatherOtherUnions.forEach((fou) => {
@@ -482,9 +521,10 @@ export function FamilyTree3D({ rootId, onSelectMember, onSelectUnion }: FamilyTr
         return;
       }
 
-      // ── Cas normal : cercle autour du père ───────────────────────
+      // ── Cas normal : slot du triangle (excluant le slot mère) ────
       const otherUnionId = fou.union ? `u-${fou.union.id}` : `fou-partner-${fou.partner!.id}`;
-      const angle = fou_startAngle + (2 * Math.PI / Math.max(N_fou, 1)) * fou_circleIdx;
+      const slotIdx = fou_slots[fou_circleIdx] ?? fou_circleIdx;
+      const angle = fou_startAngle + (2 * Math.PI / Math.max(N_total_fou, 1)) * slotIdx;
       fou_circleIdx++;
 
       const otherPartnerDesired: [number, number, number] = [

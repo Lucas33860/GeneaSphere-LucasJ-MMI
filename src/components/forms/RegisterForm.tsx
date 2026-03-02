@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/client";
+import { authFieldCls } from "@/lib/ui";
 
 const registerSchema = z.object({
   full_name: z.string().min(2, "Nom complet requis (min. 2 caractères)").max(100),
@@ -16,8 +17,6 @@ const registerSchema = z.object({
 });
 
 type RegisterInput = z.infer<typeof registerSchema>;
-
-const fieldCls = "w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition";
 
 export function RegisterForm() {
   const [serverError, setServerError] = useState<string | null>(null);
@@ -82,7 +81,7 @@ export function RegisterForm() {
           type="text"
           autoComplete="name"
           placeholder="Jean Dupont"
-          className={fieldCls}
+          className={authFieldCls}
         />
         {errors.full_name && <p className="text-red-400 text-xs mt-1">{errors.full_name.message}</p>}
       </div>
@@ -94,7 +93,7 @@ export function RegisterForm() {
           type="email"
           autoComplete="email"
           placeholder="vous@exemple.com"
-          className={fieldCls}
+          className={authFieldCls}
         />
         {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email.message}</p>}
       </div>
@@ -106,7 +105,7 @@ export function RegisterForm() {
           type="password"
           autoComplete="new-password"
           placeholder="Min. 8 caractères"
-          className={fieldCls}
+          className={authFieldCls}
         />
         {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password.message}</p>}
       </div>

@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/client";
+import { authFieldCls } from "@/lib/ui";
 
 const loginSchema = z.object({
   email: z.string().email("Email invalide"),
@@ -13,8 +14,6 @@ const loginSchema = z.object({
 });
 
 type LoginInput = z.infer<typeof loginSchema>;
-
-const fieldCls = "w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition";
 
 export function LoginForm() {
   const router = useRouter();
@@ -64,7 +63,7 @@ export function LoginForm() {
           type="email"
           autoComplete="email"
           placeholder="vous@exemple.com"
-          className={fieldCls}
+          className={authFieldCls}
         />
         {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email.message}</p>}
       </div>
@@ -76,7 +75,7 @@ export function LoginForm() {
           type="password"
           autoComplete="current-password"
           placeholder="••••••••"
-          className={fieldCls}
+          className={authFieldCls}
         />
         {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password.message}</p>}
       </div>
