@@ -67,69 +67,90 @@ export async function GET(request: Request) {
   };
 
   // ── Autres unions de la mère ──────────────────────────────────
-  // On cherche tous les enfants de la mère, on groupe par father_id
+  // On interroge directement la table spouses pour inclure toutes les unions,
+  // même celles sans enfants communs.
   const motherOtherUnions: ExtraUnion[] = [];
   if (motherId) {
-    const { data: motherChildren } = await supabase
+    const { data: motherSpouses } = await supabase
+      .from("spouses")
+      .select("*")
+      .or(`member1_id.eq.${motherId},member2_id.eq.${motherId}`);
+
+    for (const sp of (motherSpouses ?? [])) {
+      const partnerId = sp.member1_id === motherId ? sp.member2_id : sp.member1_id;
+      // Ignorer l'union principale (père biologique)
+      if (fatherId && partnerId === fatherId) continue;
+
+      const { data: partner } = await supabase.from("members").select("*").eq("id", partnerId).single();
+      if (!partner) continue;
+
+      // Enfants de cette union
+      const { data: childData } = await supabase
+        .from("members")
+        .select("*")
+        .or(
+          `and(father_id.eq.${motherId},mother_id.eq.${partnerId}),` +
+          `and(mother_id.eq.${motherId},father_id.eq.${partnerId})`
+        );
+      const children = (childData ?? []).filter(
+        (c) => !sibIds.has(c.id) && c.id !== personId
+      );
+      motherOtherUnions.push({ union: sp, partner, children });
+    }
+
+    // Enfants de la mère sans père enregistré
+    const { data: soloMotherData } = await supabase
       .from("members")
       .select("*")
       .eq("mother_id", motherId)
+      .is("father_id", null)
       .neq("id", personId);
-
-    const byFather = new Map<string | null, Record<string, unknown>[]>();
-    for (const child of (motherChildren ?? [])) {
-      if (sibIds.has(child.id)) continue;
-      const fid = (child.father_id as string | null) ?? null;
-      if (!byFather.has(fid)) byFather.set(fid, []);
-      byFather.get(fid)!.push(child as Record<string, unknown>);
-    }
-
-    for (const [fid, children] of byFather.entries()) {
-      if (fid === fatherId) continue;
-      if (fid === null) {
-        motherOtherUnions.push({ union: null, partner: null, children });
-      } else {
-        const { data: partner } = await supabase.from("members").select("*").eq("id", fid).single();
-        if (!partner) continue;
-        const { data: union } = await supabase.from("spouses").select("*").or(
-          `and(member1_id.eq.${motherId},member2_id.eq.${fid}),` +
-          `and(member1_id.eq.${fid},member2_id.eq.${motherId})`
-        ).maybeSingle();
-        motherOtherUnions.push({ union: union ?? null, partner, children });
-      }
+    const soloMotherChildren = (soloMotherData ?? []).filter((c) => !sibIds.has(c.id));
+    if (soloMotherChildren.length > 0) {
+      motherOtherUnions.push({ union: null, partner: null, children: soloMotherChildren });
     }
   }
 
   // ── Autres unions du père ─────────────────────────────────────
   const fatherOtherUnions: ExtraUnion[] = [];
   if (fatherId) {
-    const { data: fatherChildren } = await supabase
+    const { data: fatherSpouses } = await supabase
+      .from("spouses")
+      .select("*")
+      .or(`member1_id.eq.${fatherId},member2_id.eq.${fatherId}`);
+
+    for (const sp of (fatherSpouses ?? [])) {
+      const partnerId = sp.member1_id === fatherId ? sp.member2_id : sp.member1_id;
+      // Ignorer l'union principale (mère biologique)
+      if (motherId && partnerId === motherId) continue;
+
+      const { data: partner } = await supabase.from("members").select("*").eq("id", partnerId).single();
+      if (!partner) continue;
+
+      // Enfants de cette union
+      const { data: childData } = await supabase
+        .from("members")
+        .select("*")
+        .or(
+          `and(father_id.eq.${fatherId},mother_id.eq.${partnerId}),` +
+          `and(mother_id.eq.${fatherId},father_id.eq.${partnerId})`
+        );
+      const children = (childData ?? []).filter(
+        (c) => !sibIds.has(c.id) && c.id !== personId
+      );
+      fatherOtherUnions.push({ union: sp, partner, children });
+    }
+
+    // Enfants du père sans mère enregistrée
+    const { data: soloFatherData } = await supabase
       .from("members")
       .select("*")
       .eq("father_id", fatherId)
+      .is("mother_id", null)
       .neq("id", personId);
-
-    const byMother = new Map<string | null, Record<string, unknown>[]>();
-    for (const child of (fatherChildren ?? [])) {
-      if (sibIds.has(child.id)) continue;
-      const mid = (child.mother_id as string | null) ?? null;
-      if (!byMother.has(mid)) byMother.set(mid, []);
-      byMother.get(mid)!.push(child as Record<string, unknown>);
-    }
-
-    for (const [mid, children] of byMother.entries()) {
-      if (mid === motherId) continue;
-      if (mid === null) {
-        fatherOtherUnions.push({ union: null, partner: null, children });
-      } else {
-        const { data: partner } = await supabase.from("members").select("*").eq("id", mid).single();
-        if (!partner) continue;
-        const { data: union } = await supabase.from("spouses").select("*").or(
-          `and(member1_id.eq.${fatherId},member2_id.eq.${mid}),` +
-          `and(member1_id.eq.${mid},member2_id.eq.${fatherId})`
-        ).maybeSingle();
-        fatherOtherUnions.push({ union: union ?? null, partner, children });
-      }
+    const soloFatherChildren = (soloFatherData ?? []).filter((c) => !sibIds.has(c.id));
+    if (soloFatherChildren.length > 0) {
+      fatherOtherUnions.push({ union: null, partner: null, children: soloFatherChildren });
     }
   }
 
@@ -160,6 +181,19 @@ export async function GET(request: Request) {
       );
 
     ownUnions.push({ union: u, partner, children: childData ?? [] });
+  }
+
+  // Enfants nés sans autre parent enregistré (parent unique)
+  const { data: soloAsFather } = await supabase
+    .from("members").select("*")
+    .eq("father_id", personId).is("mother_id", null);
+  const { data: soloAsMother } = await supabase
+    .from("members").select("*")
+    .eq("mother_id", personId).is("father_id", null);
+  const soloKids = [...(soloAsFather ?? []), ...(soloAsMother ?? [])];
+  if (soloKids.length > 0) {
+    (ownUnions as Array<{ union: unknown; partner: unknown; children: unknown[] }>)
+      .push({ union: null, partner: null, children: soloKids });
   }
 
   return NextResponse.json({

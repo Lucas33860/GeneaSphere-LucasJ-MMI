@@ -17,6 +17,8 @@ const registerSchema = z.object({
 
 type RegisterInput = z.infer<typeof registerSchema>;
 
+const fieldCls = "w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition";
+
 export function RegisterForm() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -49,103 +51,79 @@ export function RegisterForm() {
     setSuccess(true);
   };
 
-  return (
-    <>
-    {/* ── Modal confirmation email ──────────────────────────── */}
-    {success && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-sm w-full text-center space-y-4">
-          <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto text-3xl">
-            📧
-          </div>
-          <h2 className="text-xl font-bold text-gray-900">Vérifiez vos mails !</h2>
-          <p className="text-gray-600 text-sm">
-            Un email de confirmation a été envoyé à votre adresse.<br />
-            Cliquez sur le lien dans le mail pour activer votre compte.
-          </p>
-          <p className="text-xs text-gray-400">
-            Pensez à vérifier vos spams si vous ne le trouvez pas.
-          </p>
-          <a
-            href="/login"
-            className="block w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded-lg transition-colors text-sm"
-          >
-            Aller à la connexion
-          </a>
+  if (success) {
+    return (
+      <div className="text-center space-y-4 py-4">
+        <div className="w-16 h-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center mx-auto text-3xl">
+          📧
         </div>
+        <h2 className="text-lg font-bold text-white">Vérifiez vos mails !</h2>
+        <p className="text-slate-400 text-sm leading-relaxed">
+          Un email de confirmation a été envoyé.<br />
+          Cliquez sur le lien pour activer votre compte.
+        </p>
+        <p className="text-xs text-slate-500">Pensez à vérifier vos spams.</p>
+        <a
+          href="/login"
+          className="block w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-xl transition-colors text-sm mt-2"
+        >
+          Aller à la connexion
+        </a>
       </div>
-    )}
+    );
+  }
 
+  return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Nom complet
-        </label>
+        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Nom complet</label>
         <input
           {...register("full_name")}
           type="text"
           autoComplete="name"
           placeholder="Jean Dupont"
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className={fieldCls}
         />
-        {errors.full_name && (
-          <p className="text-red-500 text-xs mt-1">{errors.full_name.message}</p>
-        )}
+        {errors.full_name && <p className="text-red-400 text-xs mt-1">{errors.full_name.message}</p>}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Email
-        </label>
+        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Email</label>
         <input
           {...register("email")}
           type="email"
           autoComplete="email"
           placeholder="vous@exemple.com"
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className={fieldCls}
         />
-        {errors.email && (
-          <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>
-        )}
+        {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email.message}</p>}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Mot de passe
-        </label>
+        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Mot de passe</label>
         <input
           {...register("password")}
           type="password"
           autoComplete="new-password"
           placeholder="Min. 8 caractères"
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className={fieldCls}
         />
-        {errors.password && (
-          <p className="text-red-500 text-xs mt-1">{errors.password.message}</p>
-        )}
+        {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password.message}</p>}
       </div>
 
       {serverError && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">
+        <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">
           {serverError}
-        </p>
+        </div>
       )}
 
       <button
         type="submit"
         disabled={isSubmitting}
-        className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-2 rounded-lg transition-colors"
+        className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl transition-colors mt-2"
       >
         {isSubmitting ? "Création du compte…" : "Créer mon compte"}
       </button>
-
-      <p className="text-sm text-center text-gray-500">
-        Déjà un compte ?{" "}
-        <a href="/login" className="text-blue-600 hover:underline font-medium">
-          Se connecter
-        </a>
-      </p>
     </form>
-    </>
   );
 }

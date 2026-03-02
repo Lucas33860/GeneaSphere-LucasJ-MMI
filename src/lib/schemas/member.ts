@@ -11,6 +11,7 @@ export const memberSchema = z.object({
   is_private: z.boolean().optional().default(false),
   father_id: z.string().uuid().nullable().optional(),
   mother_id: z.string().uuid().nullable().optional(),
+  photo_url: z.string().url().nullable().optional(),
 });
 
 export type MemberInput = z.infer<typeof memberSchema>;

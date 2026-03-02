@@ -14,6 +14,8 @@ const loginSchema = z.object({
 
 type LoginInput = z.infer<typeof loginSchema>;
 
+const fieldCls = "w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition";
+
 export function LoginForm() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
@@ -40,10 +42,7 @@ export function LoginForm() {
       return;
     }
 
-    // Récupérer le profil pour rediriger selon le rôle
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
     const { data: profile } = await supabase
@@ -59,57 +58,42 @@ export function LoginForm() {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Email
-        </label>
+        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Email</label>
         <input
           {...register("email")}
           type="email"
           autoComplete="email"
           placeholder="vous@exemple.com"
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className={fieldCls}
         />
-        {errors.email && (
-          <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>
-        )}
+        {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email.message}</p>}
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Mot de passe
-        </label>
+        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Mot de passe</label>
         <input
           {...register("password")}
           type="password"
           autoComplete="current-password"
           placeholder="••••••••"
-          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className={fieldCls}
         />
-        {errors.password && (
-          <p className="text-red-500 text-xs mt-1">{errors.password.message}</p>
-        )}
+        {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password.message}</p>}
       </div>
 
       {serverError && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-200 px-3 py-2 rounded-lg">
+        <div className="bg-red-500/10 border border-red-500/20 text-red-400 text-sm px-4 py-3 rounded-xl">
           {serverError}
-        </p>
+        </div>
       )}
 
       <button
         type="submit"
         disabled={isSubmitting}
-        className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium py-2 rounded-lg transition-colors"
+        className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl transition-colors mt-2"
       >
         {isSubmitting ? "Connexion…" : "Se connecter"}
       </button>
-
-      <p className="text-sm text-center text-gray-500">
-        Pas encore de compte ?{" "}
-        <a href="/register" className="text-blue-600 hover:underline font-medium">
-          S&apos;inscrire
-        </a>
-      </p>
     </form>
   );
 }

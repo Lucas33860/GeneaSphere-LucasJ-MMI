@@ -31,8 +31,8 @@ interface MotherOtherUnion {
   children: Member[];
 }
 interface OwnUnionAPI {
-  union: Spouse;
-  partner: Member;
+  union: Spouse | null;   // null = enfant de parent unique
+  partner: Member | null; // null = même raison
   children: Member[];
 }
 interface TreeData {
@@ -157,14 +157,29 @@ function PersonSphere({ node, onClick }: {
 }
 
 // ── UnionSphere ───────────────────────────────────────────────────
-function UnionSphere({ node }: { node: GraphUnion }) {
+function UnionSphere({ node, onClick }: { node: GraphUnion; onClick?: (u: Spouse) => void }) {
+  const [hovered, setHovered] = useState(false);
+  const meshRef = useRef<THREE.Mesh>(null);
   const color = node.union ? unionColor(node.union) : "#9ca3af";
   const picto = node.union ? unionPicto(node.union) : "·";
+  const clickable = !!node.union;
+
+  useFrame(() => {
+    if (!meshRef.current) return;
+    const t = hovered ? 1.3 : 1;
+    meshRef.current.scale.lerp(new THREE.Vector3(t, t, t), 0.12);
+  });
+
   return (
     <group position={node.pos}>
-      <mesh>
+      <mesh
+        ref={meshRef}
+        onClick={clickable ? (e => { e.stopPropagation(); onClick?.(node.union!); }) : undefined}
+        onPointerOver={clickable ? (e => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }) : undefined}
+        onPointerOut={clickable ? (() => { setHovered(false); document.body.style.cursor = "default"; }) : undefined}
+      >
         <sphereGeometry args={[0.4, 24, 24]} />
-        <meshStandardMaterial color={color} roughness={0.3} metalness={0.2} />
+        <meshStandardMaterial color={color} roughness={0.3} metalness={0.2} emissive={hovered ? color : "#000000"} emissiveIntensity={hovered ? 0.4 : 0} />
       </mesh>
       <Billboard>
         <Text position={[0, 0.8, 0]} fontSize={0.5} anchorX="center" renderOrder={1}>
@@ -209,11 +224,12 @@ function CameraReset({ trigger }: { trigger: number }) {
 // ── Props ─────────────────────────────────────────────────────────
 interface FamilyTree3DProps {
   rootId: string;
-  onSelectMember: (m: Member, union?: Spouse) => void;
+  onSelectMember: (m: Member) => void;
+  onSelectUnion?: (u: Spouse) => void;
 }
 
 // ── Composant principal ───────────────────────────────────────────
-export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
+export function FamilyTree3D({ rootId, onSelectMember, onSelectUnion }: FamilyTree3DProps) {
   const [persons, setPersons] = useState<GraphPerson[]>([]);
   const [unions,  setUnions]  = useState<GraphUnion[]>([]);
   const [edges,   setEdges]   = useState<GraphEdge[]>([]);
@@ -303,10 +319,11 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
       return personPosRef.current.get(personId) ?? basePos;
     })();
 
-    // ── Parents (Y +9, ±7 X) ─────────────────────────────────────
+    // ── Constantes de placement ───────────────────────────────────
     const PARENT_Y = 9;
     const PARENT_X = 7;
     const UNION_Y  = 4.5;
+    const RADIUS   = 13;
 
     const confTest = (p: [number, number, number]) =>
       occupiedPosRef.current.some(
@@ -367,25 +384,31 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
     });
 
     // ── Demi-frères/sœurs via motherOtherUnions ───────────────────
-    // L'API retourne les autres unions de la mère + leurs enfants
     const motherOtherUnions = data.motherOtherUnions ?? [];
     const knownChildIds = new Set<string>([personId]);
     data.siblings.forEach(s => knownChildIds.add(s.id));
 
-    motherOtherUnions.forEach((mou, ouIdx) => {
+    // Cercle autour de la mère — N = nombre d'autres unions avec partenaire
+    const mouPartnered = motherOtherUnions.filter(mou => mou.partner !== null).length;
+    const N_mou = mouPartnered;
+    const mou_startAngle = (N_mou % 2 === 1 && N_mou > 1) ? Math.PI / 2 : 0;
+    let mou_circleIdx = 0;
+
+    motherOtherUnions.forEach((mou) => {
       const motherPos = actualMother ?? motherDesired;
       const halfChildren = (mou.children ?? []).filter(c => !knownChildIds.has(c.id));
 
       // ── Cas parent seul : pas de partenaire ni d'union ───────────
       if (!mou.partner) {
+        const sibOffset = data.siblings.length;
         halfChildren.forEach((halfChild, hci) => {
           knownChildIds.add(halfChild.id);
           const hSide = hci % 2 === 0 ? 1 : -1;
           const hDist = Math.ceil((hci + 1) / 2);
           const desired: [number, number, number] = [
-            motherPos[0] + (ouIdx + 1) * 10,
-            motherPos[1] - PARENT_Y,
-            motherPos[2] + hSide * hDist * 8,
+            selfPos[0] - 9,
+            selfPos[1],
+            selfPos[2] + hSide * (sibOffset + hDist) * 8,
           ];
           const actualHalfChild = addPerson(halfChild, desired);
           if (actualMother) addEdge(`e-alone-m-${halfChild.id}`, actualMother, actualHalfChild);
@@ -393,19 +416,21 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
         return;
       }
 
-      // ── Cas normal : partenaire + union ──────────────────────────
-      const otherUnionId = `u-${mou.union!.id}`;
-      const mSide = ouIdx % 2 === 0 ? 1 : -1; // alternance gauche/droite
+      // ── Cas normal : cercle autour de la mère ────────────────────
+      const otherUnionId = mou.union ? `u-${mou.union.id}` : `mou-partner-${mou.partner!.id}`;
+      const angle = mou_startAngle + (2 * Math.PI / Math.max(N_mou, 1)) * mou_circleIdx;
+      mou_circleIdx++;
+
       const otherPartnerDesired: [number, number, number] = [
-        motherPos[0] + mSide * (ouIdx + 1) * 14,
+        motherPos[0] + RADIUS * Math.cos(angle),
         motherPos[1],
-        motherPos[2] + (ouIdx + 1) * 8,
+        motherPos[2] + RADIUS * Math.sin(angle),
       ];
       const actualOtherPartner = addPerson(mou.partner, otherPartnerDesired);
 
       const otherUnionMid: [number, number, number] = [
         (motherPos[0] + actualOtherPartner[0]) / 2,
-        motherPos[1] - UNION_Y, // en dessous des deux → forme un V
+        motherPos[1] - UNION_Y,
         (motherPos[2] + actualOtherPartner[2]) / 2,
       ];
       const actualOtherUnionPos = addUnion(otherUnionId, mou.union, otherUnionMid);
@@ -428,20 +453,28 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
 
     // ── Demi-frères/sœurs côté père via fatherOtherUnions ───────────
     const fatherOtherUnions = data.fatherOtherUnions ?? [];
-    fatherOtherUnions.forEach((fou, ouIdx) => {
+
+    // Cercle autour du père — N = nombre d'autres unions avec partenaire
+    const fouPartnered = fatherOtherUnions.filter(fou => fou.partner !== null).length;
+    const N_fou = fouPartnered;
+    const fou_startAngle = (N_fou % 2 === 1 && N_fou > 1) ? Math.PI / 2 : 0;
+    let fou_circleIdx = 0;
+
+    fatherOtherUnions.forEach((fou) => {
       const fPos = actualFather ?? fatherDesired;
       const fatherHalfChildren = (fou.children ?? []).filter(c => !knownChildIds.has(c.id));
 
       // ── Cas parent seul : pas de partenaire ──────────────────────
       if (!fou.partner) {
+        const sibOffset = data.siblings.length;
         fatherHalfChildren.forEach((halfChild, hci) => {
           knownChildIds.add(halfChild.id);
           const hSide = hci % 2 === 0 ? 1 : -1;
           const hDist = Math.ceil((hci + 1) / 2);
           const desired: [number, number, number] = [
-            fPos[0] - (ouIdx + 1) * 10,
-            fPos[1] - PARENT_Y,
-            fPos[2] + hSide * hDist * 8,
+            selfPos[0] - 9,
+            selfPos[1],
+            selfPos[2] + hSide * (sibOffset + hDist) * 8,
           ];
           const actualHalfChild = addPerson(halfChild, desired);
           if (actualFather) addEdge(`e-alone-f-${halfChild.id}`, actualFather, actualHalfChild);
@@ -449,19 +482,21 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
         return;
       }
 
-      // ── Cas normal : partenaire + union ──────────────────────────
-      const otherUnionId = `u-${fou.union!.id}`;
-      const fSide = ouIdx % 2 === 0 ? -1 : 1; // alternance gauche/droite
+      // ── Cas normal : cercle autour du père ───────────────────────
+      const otherUnionId = fou.union ? `u-${fou.union.id}` : `fou-partner-${fou.partner!.id}`;
+      const angle = fou_startAngle + (2 * Math.PI / Math.max(N_fou, 1)) * fou_circleIdx;
+      fou_circleIdx++;
+
       const otherPartnerDesired: [number, number, number] = [
-        fPos[0] + fSide * (ouIdx + 1) * 14,
+        fPos[0] + RADIUS * Math.cos(angle),
         fPos[1],
-        fPos[2] + (ouIdx + 1) * 8,
+        fPos[2] + RADIUS * Math.sin(angle),
       ];
       const actualOtherPartner = addPerson(fou.partner, otherPartnerDesired);
 
       const otherUnionMid: [number, number, number] = [
         (fPos[0] + actualOtherPartner[0]) / 2,
-        fPos[1] - UNION_Y, // en dessous des deux → forme un V
+        fPos[1] - UNION_Y,
         (fPos[2] + actualOtherPartner[2]) / 2,
       ];
       const actualOtherUnionPos = addUnion(otherUnionId, fou.union, otherUnionMid);
@@ -488,16 +523,41 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
     //           union node
     //           /   \
     //        enfant enfant
-    const newOwnUnions = data.ownUnions.filter(
-      ou => !unionIdsRef.current.has(`u-${ou.union.id}`)
-    );
-    const RADIUS = 13;
-    const N = newOwnUnions.length;
+    const newOwnUnions = data.ownUnions.filter(ou => {
+      if (!ou.union) return true; // entrée parent-unique, toujours inclure
+      return !unionIdsRef.current.has(`u-${ou.union.id}`);
+    });
+    // Compte seulement les unions réelles (avec partenaire) pour la répartition en cercle
+    const N = newOwnUnions.filter(ou => ou.partner !== null).length;
+    // Pour N impairs > 1 (triangle, pentagone…), démarrer à π/2 (devant)
+    // pour que la distribution soit symétrique gauche/droite depuis la caméra.
+    // N=1 et N pairs : démarrage à 0 (droite), ce qui donne gauche+droite pour N=2.
+    const startAngle = (N % 2 === 1 && N > 1) ? Math.PI / 2 : 0;
+    let circleIdx = 0;
 
     newOwnUnions.forEach((ou, j) => {
-      const unionId = `u-${ou.union.id}`;
-      // Répartition uniforme en cercle : N=1→droite, N=2→gauche/droite, N=3→triangle, etc.
-      const angle = (2 * Math.PI / Math.max(N, 1)) * j;
+      const unionId = ou.union ? `u-${ou.union.id}` : `solo-${personId}-${j}`;
+
+      // ── Cas parent unique : enfants directement sous self ─────────
+      if (!ou.partner) {
+        (ou.children ?? []).forEach((child, k) => {
+          const kSide = k % 2 === 0 ? 1 : -1;
+          const kDist = Math.ceil((k + 1) / 2);
+          const childDesired: [number, number, number] = [
+            selfPos[0] + kSide * kDist * 8,
+            selfPos[1] - PARENT_Y,
+            selfPos[2] + RADIUS * 0.5,
+          ];
+          const actualChild = addPerson(child, childDesired);
+          addEdge(`e-solo-child-${child.id}`, selfPos, actualChild);
+        });
+        return;
+      }
+
+      // ── Cas normal : partenaire + union en V ─────────────────────
+      // Répartition uniforme en cercle autour de self
+      const angle = startAngle + (2 * Math.PI / Math.max(N, 1)) * circleIdx;
+      circleIdx++;
 
       const partnerDesired: [number, number, number] = [
         selfPos[0] + RADIUS * Math.cos(angle),
@@ -546,6 +606,10 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
     expandNode(node.id, node.pos);
   }, [onSelectMember, expandNode]);
 
+  const handleClickUnion = useCallback((union: Spouse) => {
+    onSelectUnion?.(union);
+  }, [onSelectUnion]);
+
   return (
     <Canvas
       camera={{ position: [4, 22, 32], fov: 60 }}
@@ -562,8 +626,8 @@ export function FamilyTree3D({ rootId, onSelectMember }: FamilyTree3DProps) {
       <OrbitControls makeDefault enableDamping dampingFactor={0.06} />
 
       {edges.map(e   => <Edge        key={e.id} edge={e} />)}
-      {unions.map(u  => <UnionSphere key={u.id} node={u} />)}
-      {persons.map(p      => <PersonSphere key={p.id} node={p} onClick={handleClickPerson} />)}
+      {unions.map(u  => <UnionSphere key={u.id} node={u} onClick={handleClickUnion} />)}
+      {persons.map(p => <PersonSphere key={p.id} node={p} onClick={handleClickPerson} />)}
     </Canvas>
   );
 }

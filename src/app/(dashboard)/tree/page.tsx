@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { FamilyTree3D } from "@/components/tree/FamilyTree3D";
 import type { Member, Spouse } from "@/types";
 import { inputCls } from "@/lib/ui";
+import { createClient } from "@/lib/supabase/client";
 
 // ── Schemas ───────────────────────────────────────────────────────
 const editMemberSchema = z.object({
@@ -25,15 +26,14 @@ export default function TreePage() {
   const [members, setMembers]       = useState<Member[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [memberError, setMemberError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Panneau info / édition
   const [panel, setPanel] = useState<
     { type: "member"; data: Member; editing: boolean } |
     { type: "union";  data: Spouse; editing: boolean } |
     null
   >(null);
 
-  // ── Chargement des membres ─────────────────────────────────────
   useEffect(() => {
     fetch("/api/members")
       .then(r => r.json())
@@ -44,203 +44,289 @@ export default function TreePage() {
       .catch(() => setMemberError("Impossible de charger les membres"));
   }, []);
 
-  const handleSelectMember = (m: Member) => {
-    setPanel({ type: "member", data: m, editing: false });
-  };
+  const handleSelectMember = (m: Member) => setPanel({ type: "member", data: m, editing: false });
+  const handleSelectUnion  = (u: Spouse) => setPanel({ type: "union",  data: u, editing: false });
 
   const legendItems = [
-    { picto: "♥",   label: "Couple" },
-    { picto: "💔",  label: "Ex-couple" },
-    { picto: "💍",  label: "Marié·e" },
-    { picto: "💍✗", label: "Divorcé·e" },
-    { picto: "†",   label: "Décédé·e" },
+    { picto: "♥",   label: "Couple",     color: "text-pink-400" },
+    { picto: "💔",  label: "Ex-couple",  color: "text-slate-400" },
+    { picto: "💍",  label: "Marié·e",    color: "text-amber-400" },
+    { picto: "💍✗", label: "Divorcé·e",  color: "text-slate-500" },
+    { picto: "†",   label: "Décédé·e",   color: "text-slate-500" },
   ];
 
   return (
-    <main className="min-h-screen bg-gray-50">
-      <div className="flex h-[calc(100vh-57px)]">
+    <main className="min-h-screen bg-slate-900 flex flex-col" style={{ height: "calc(100vh - 56px)" }}>
 
-        {/* ── Sidebar gauche : légende ───────────────────────── */}
-        <aside className="w-40 shrink-0 bg-white border-r border-gray-100 hidden lg:flex flex-col gap-1 p-4 overflow-y-auto justify-center">
-          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Légende</p>
-          {legendItems.map(({ picto, label }) => (
-            <span key={label} className="flex items-center gap-2 text-xs text-gray-600 py-0.5">
-              <span className="text-base w-6 text-center">{picto}</span>
-              {label}
-            </span>
-          ))}
-          <div className="mt-4 pt-3 border-t border-gray-100 space-y-2 text-xs text-gray-400">
-            <p className="flex items-center gap-1.5">
-              <span className="inline-flex gap-0.5">
-                <span className="w-3 h-3 rounded-full bg-blue-400 inline-block" />
-                <span className="w-3 h-3 rounded-full bg-emerald-400 inline-block" />
-                <span className="w-3 h-3 rounded-full bg-rose-400 inline-block" />
+      {/* ── Barre de contrôle ─────────────────────────────────── */}
+      <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-800/80 backdrop-blur border-b border-white/10 shrink-0">
+        <span className="text-white font-semibold text-sm hidden sm:block">Arbre 3D</span>
+
+        {memberError ? (
+          <p className="text-xs text-red-400 bg-red-900/30 px-3 py-1 rounded-lg">{memberError}</p>
+        ) : members.length > 0 ? (
+          <select
+            value={selectedId}
+            onChange={e => { setSelectedId(e.target.value); setPanel(null); }}
+            className="bg-white/10 border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-50"
+          >
+            {members.map(m => (
+              <option key={m.id} value={m.id} className="bg-slate-800">
+                {m.first_name} {m.last_name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <p className="text-xs text-slate-400">
+            Aucun membre.{" "}
+            <a href="/members" className="text-indigo-400 underline">Ajoutez-en d&apos;abord.</a>
+          </p>
+        )}
+
+        <div className="ml-auto flex items-center gap-3">
+          {/* Légende inline petite */}
+          <div className="hidden lg:flex items-center gap-3">
+            {legendItems.map(({ picto, label, color }) => (
+              <span key={label} className={`flex items-center gap-1 text-xs ${color}`}>
+                <span>{picto}</span>
+                <span className="text-slate-400">{label}</span>
               </span>
-              Couleur = lignée (nom de famille)
-            </p>
-            <p>Clic → info + expand</p>
-            <p>Drag → rotation</p>
-            <p>Scroll → zoom</p>
+            ))}
           </div>
-        </aside>
+          <button
+            onClick={() => setSidebarOpen(v => !v)}
+            className="lg:hidden text-slate-400 hover:text-white px-2 py-1 rounded text-xs"
+          >
+            Légende
+          </button>
+          <div className="hidden lg:flex text-xs text-slate-500 gap-3 ml-2 border-l border-white/10 pl-3">
+            <span>🖱 Drag = rotation</span>
+            <span>🔍 Scroll = zoom</span>
+            <span>Clic = info</span>
+          </div>
+        </div>
+      </div>
 
-        {/* ── Zone principale ───────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      {/* ── Zone canvas ───────────────────────────────────────── */}
+      <div className="flex-1 relative overflow-hidden">
 
-          {/* En-tête */}
-          <div className="flex flex-wrap items-center gap-3 px-6 py-4 bg-white border-b border-gray-100">
-            <h1 className="text-xl font-bold text-gray-900">Arbre généalogique 3D</h1>
+        {/* Canvas 3D */}
+        {selectedId ? (
+          <FamilyTree3D
+            rootId={selectedId}
+            onSelectMember={handleSelectMember}
+            onSelectUnion={handleSelectUnion}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+            Sélectionnez un membre pour démarrer.
+          </div>
+        )}
 
-            {memberError ? (
-              <p className="text-sm text-red-600 bg-red-50 px-3 py-1.5 rounded-lg">{memberError}</p>
-            ) : members.length > 0 ? (
-              <select
-                value={selectedId}
-                onChange={e => { setSelectedId(e.target.value); setPanel(null); }}
-                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {members.map(m => (
-                  <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
-                ))}
-              </select>
-            ) : (
-              <p className="text-sm text-gray-400">
-                Aucun membre.{" "}
-                <a href="/members" className="text-blue-600 underline">Ajoutez-en d&apos;abord.</a>
+        {/* Légende mobile */}
+        {sidebarOpen && (
+          <div className="absolute top-2 right-2 z-20 bg-slate-800/95 backdrop-blur border border-white/10 rounded-2xl p-4 shadow-xl">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Légende</p>
+            {legendItems.map(({ picto, label, color }) => (
+              <p key={label} className={`flex items-center gap-2 text-sm mb-1.5 ${color}`}>
+                <span className="w-5 text-center">{picto}</span>
+                <span className="text-slate-300">{label}</span>
               </p>
-            )}
+            ))}
+            <div className="mt-3 pt-3 border-t border-white/10 text-xs text-slate-500 space-y-1">
+              <p>🎨 Couleur = lignée (nom de famille)</p>
+              <p>Clic sphère = infos + expansion</p>
+            </div>
           </div>
+        )}
 
-          {/* Canvas 3D + panneau info */}
-          <div className="flex-1 relative overflow-hidden">
+        {/* ── Panneau info/édition ──────────────────────────── */}
+        {panel && (
+          <div className="absolute top-3 left-3 z-20 w-80 bg-slate-900/95 backdrop-blur border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
 
-            {/* Canvas 3D plein écran */}
-            {selectedId && (
-              <FamilyTree3D
-                rootId={selectedId}
-                onSelectMember={handleSelectMember}
+            {/* Panneau MEMBRE — vue */}
+            {panel.type === "member" && !panel.editing && (
+              <MemberPanel
+                member={panel.data}
+                members={members}
+                onEdit={() => setPanel({ ...panel, editing: true })}
+                onClose={() => setPanel(null)}
               />
             )}
 
-            {!selectedId && (
-              <div className="flex items-center justify-center h-full text-gray-400">
-                Sélectionnez un membre pour démarrer.
+            {/* Panneau MEMBRE — édition */}
+            {panel.type === "member" && panel.editing && (
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <p className="font-bold text-white text-sm">Modifier</p>
+                  <button onClick={() => setPanel({ ...panel, editing: false })} className="text-slate-400 hover:text-white text-xs">✕</button>
+                </div>
+                <EditMemberForm
+                  member={panel.data}
+                  onCancel={() => setPanel({ ...panel, editing: false })}
+                  onSuccess={updated => {
+                    setPanel({ type: "member", data: updated, editing: false });
+                    setMembers(prev => prev.map(m => m.id === updated.id ? updated : m));
+                  }}
+                />
               </div>
             )}
 
-            {/* ── Panneau info overlay top-left ──────────────── */}
-            {panel && (
-              <div className="absolute top-4 left-4 z-10 w-72 bg-white rounded-2xl border border-gray-100 shadow-lg p-5 space-y-4">
+            {/* Panneau UNION — vue */}
+            {panel.type === "union" && !panel.editing && (
+              <UnionPanel
+                union={panel.data}
+                onEdit={() => setPanel({ ...panel, editing: true })}
+                onClose={() => setPanel(null)}
+              />
+            )}
 
-                {/* Panneau MEMBRE (info) */}
-                {panel.type === "member" && !panel.editing && (
-                  <>
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-lg shrink-0">
-                        {panel.data.first_name[0]}{panel.data.last_name[0]}
-                      </div>
-                      <div>
-                        <p className="font-semibold text-gray-900">{panel.data.first_name} {panel.data.last_name}</p>
-                        <p className="text-xs text-gray-400">
-                          {panel.data.gender
-                            ? ({ male: "Homme", female: "Femme", other: "Autre" } as Record<string, string>)[panel.data.gender]
-                            : "Genre inconnu"}
-                        </p>
-                      </div>
-                    </div>
-                    <dl className="text-sm space-y-2">
-                      {panel.data.birth_date && <InfoRow label="Naissance" value={new Date(panel.data.birth_date).toLocaleDateString("fr-FR")} />}
-                      {panel.data.birth_place && <InfoRow label="Lieu" value={panel.data.birth_place} />}
-                      {panel.data.death_date && <InfoRow label="Décès" value={new Date(panel.data.death_date).toLocaleDateString("fr-FR")} />}
-                      {panel.data.bio && <InfoRow label="Bio" value={panel.data.bio} />}
-                    </dl>
-                    <div className="flex gap-2 pt-2">
-                      <button onClick={() => setPanel({ ...panel, editing: true })} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
-                        Modifier
-                      </button>
-                      <button onClick={() => setPanel(null)} className="px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">✕</button>
-                    </div>
-                  </>
-                )}
-
-                {/* Panneau MEMBRE (édition) */}
-                {panel.type === "member" && panel.editing && (
-                  <EditMemberForm
-                    member={panel.data}
-                    onCancel={() => setPanel({ ...panel, editing: false })}
-                    onSuccess={updated => {
-                      setPanel({ type: "member", data: updated, editing: false });
-                      setMembers(prev => prev.map(m => m.id === updated.id ? updated : m));
-                    }}
-                  />
-                )}
-
-                {/* Panneau UNION (info) */}
-                {panel.type === "union" && !panel.editing && (
-                  <>
-                    <UnionInfo union={panel.data} />
-                    <div className="flex gap-2 pt-2">
-                      <button onClick={() => setPanel({ ...panel, editing: true })} className="flex-1 bg-pink-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-pink-700">
-                        Modifier
-                      </button>
-                      <button onClick={() => setPanel(null)} className="px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">✕</button>
-                    </div>
-                  </>
-                )}
-
-                {/* Panneau UNION (édition) */}
-                {panel.type === "union" && panel.editing && (
-                  <EditUnionForm
-                    union={panel.data}
-                    onCancel={() => setPanel({ ...panel, editing: false })}
-                    onSuccess={updated => setPanel({ type: "union", data: updated, editing: false })}
-                  />
-                )}
-
+            {/* Panneau UNION — édition */}
+            {panel.type === "union" && panel.editing && (
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <p className="font-bold text-white text-sm">Modifier l&apos;union</p>
+                  <button onClick={() => setPanel({ ...panel, editing: false })} className="text-slate-400 hover:text-white text-xs">✕</button>
+                </div>
+                <EditUnionForm
+                  union={panel.data}
+                  onCancel={() => setPanel({ ...panel, editing: false })}
+                  onSuccess={updated => setPanel({ type: "union", data: updated, editing: false })}
+                />
               </div>
             )}
           </div>
-        </div>
+        )}
       </div>
     </main>
   );
 }
 
-// ── Info row ──────────────────────────────────────────────────────
-function InfoRow({ label, value }: { label: string; value: string }) {
+// ── Panneau membre ────────────────────────────────────────────────
+function MemberPanel({ member, members, onEdit, onClose }: {
+  member: Member; members: Member[]; onEdit: () => void; onClose: () => void;
+}) {
+  const father = members.find(m => m.id === member.father_id);
+  const mother = members.find(m => m.id === member.mother_id);
+  const isDead = !!member.death_date;
+  const age = member.birth_date
+    ? (isDead
+        ? new Date(member.death_date!).getFullYear() - new Date(member.birth_date).getFullYear()
+        : new Date().getFullYear() - new Date(member.birth_date).getFullYear())
+    : null;
+
+  const genderLabel: Record<string, string> = { male: "♂ Homme", female: "♀ Femme", other: "⚥ Autre" };
+
   return (
-    <div>
-      <dt className="text-gray-400 text-xs">{label}</dt>
-      <dd className="text-gray-800 font-medium">{value}</dd>
-    </div>
+    <>
+      {/* Header avec photo */}
+      <div className="relative">
+        {member.photo_url ? (
+          <div className="h-32 overflow-hidden">
+            <img src={member.photo_url} alt={member.first_name} className="w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-linear-to-t from-slate-900 via-slate-900/20 to-transparent" />
+          </div>
+        ) : (
+          <div className="h-20 bg-linear-to-br from-indigo-900 to-slate-900" />
+        )}
+        <button onClick={onClose} className="absolute top-2 right-2 bg-black/40 text-white w-7 h-7 rounded-full flex items-center justify-center text-xs hover:bg-black/60">✕</button>
+        <div className="absolute bottom-0 left-4 translate-y-1/2">
+          <div className="w-14 h-14 rounded-full bg-indigo-800 border-2 border-slate-900 flex items-center justify-center text-lg font-bold text-white overflow-hidden">
+            {member.photo_url
+              ? <img src={member.photo_url} alt="" className="w-full h-full object-cover" />
+              : <>{member.first_name[0]}{member.last_name[0]}</>
+            }
+          </div>
+        </div>
+      </div>
+
+      {/* Infos */}
+      <div className="pt-10 px-4 pb-4 space-y-3">
+        <div>
+          <p className="font-bold text-white text-base leading-tight">{member.first_name} {member.last_name.toUpperCase()}</p>
+          <p className="text-slate-400 text-xs mt-0.5">
+            {member.gender ? genderLabel[member.gender] : "Genre inconnu"}
+            {age != null && ` · ${age} ans`}
+            {isDead && " · †"}
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          {member.birth_date && (
+            <InfoRowDark label="Naissance" value={
+              new Date(member.birth_date).toLocaleDateString("fr-FR") +
+              (member.birth_place ? ` — ${member.birth_place}` : "")
+            } />
+          )}
+          {member.death_date && (
+            <InfoRowDark label="Décès" value={new Date(member.death_date).toLocaleDateString("fr-FR")} />
+          )}
+          {(father || mother) && (
+            <InfoRowDark
+              label="Parents"
+              value={[father && `${father.first_name} ${father.last_name}`, mother && `${mother.first_name} ${mother.last_name}`].filter(Boolean).join(" · ")}
+            />
+          )}
+          {member.bio && <InfoRowDark label="Bio" value={member.bio} />}
+          {member.is_private && <InfoRowDark label="Visibilité" value="Profil privé 🔒" />}
+        </div>
+
+        <button
+          onClick={onEdit}
+          className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-xl text-sm font-semibold transition-colors"
+        >
+          Modifier
+        </button>
+      </div>
+    </>
   );
 }
 
-// ── Affichage union ───────────────────────────────────────────────
-function UnionInfo({ union }: { union: Spouse }) {
+// ── Panneau union ─────────────────────────────────────────────────
+function UnionPanel({ union, onEdit, onClose }: { union: Spouse; onEdit: () => void; onClose: () => void }) {
   const sep = !!union.separation_date;
-  let picto: string, label: string;
-  if (union.union_type === "couple") {
-    picto = sep ? "💔" : "♥";
-    label = sep ? "Ex-couple" : "Couple";
-  } else {
-    picto = sep ? "💍✗" : "💍";
-    label = sep ? "Divorcé·e" : "Marié·e";
-  }
+  const isCouple = union.union_type === "couple";
+  const picto = isCouple ? (sep ? "💔" : "♥") : (sep ? "💍✗" : "💍");
+  const label = isCouple ? (sep ? "Ex-couple" : "Couple") : (sep ? "Divorcé·e" : "Marié·e");
+  const color = isCouple ? (sep ? "from-slate-700 to-slate-800" : "from-pink-800 to-rose-900")
+                         : (sep ? "from-slate-700 to-slate-800" : "from-amber-800 to-yellow-900");
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <span className="text-2xl">{picto}</span>
-        <div>
-          <p className="font-semibold text-gray-900">{label}</p>
-          <p className="text-xs text-gray-400">Union</p>
+    <>
+      <div className={`h-16 bg-linear-to-br ${color} flex items-center justify-between px-4`}>
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">{picto}</span>
+          <span className="text-white font-bold">{label}</span>
         </div>
+        <button onClick={onClose} className="text-white/60 hover:text-white text-sm">✕</button>
       </div>
-      <dl className="text-sm space-y-2">
-        {union.union_date && <InfoRow label="Date de début" value={new Date(union.union_date).toLocaleDateString("fr-FR")} />}
-        {union.separation_date && <InfoRow label="Date de séparation" value={new Date(union.separation_date).toLocaleDateString("fr-FR")} />}
-        {!union.union_date && !union.separation_date && <p className="text-gray-400 text-xs">Aucune date renseignée</p>}
-      </dl>
+      <div className="px-4 py-4 space-y-2">
+        {union.union_date && (
+          <InfoRowDark label="Début" value={new Date(union.union_date).toLocaleDateString("fr-FR")} />
+        )}
+        {union.separation_date && (
+          <InfoRowDark label="Séparation" value={new Date(union.separation_date).toLocaleDateString("fr-FR")} />
+        )}
+        {!union.union_date && !union.separation_date && (
+          <p className="text-slate-500 text-xs">Aucune date renseignée</p>
+        )}
+        <button
+          onClick={onEdit}
+          className="w-full bg-pink-600 hover:bg-pink-500 text-white py-2 rounded-xl text-sm font-semibold transition-colors mt-2"
+        >
+          Modifier
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ── Helpers ───────────────────────────────────────────────────────
+function InfoRowDark({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-slate-200 text-sm font-medium">{value}</p>
     </div>
   );
 }
@@ -248,6 +334,12 @@ function UnionInfo({ union }: { union: Spouse }) {
 // ── Formulaire édition membre ─────────────────────────────────────
 function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCancel: () => void; onSuccess: (u: Member) => void }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState<string | null>(member.photo_url ?? null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const darkInput = "w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500";
+
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<EditMemberInput>({
     resolver: zodResolver(editMemberSchema),
     defaultValues: {
@@ -263,6 +355,27 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
 
   const onSubmit = async (data: EditMemberInput) => {
     setSubmitError(null);
+    let photoUrl = member.photo_url ?? null;
+
+    const file = fileRef.current?.files?.[0];
+    if (file) {
+      setUploading(true);
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const ext = file.name.split(".").pop() ?? "jpg";
+        const path = `${user.id}/${Date.now()}.${ext}`;
+        const { data: uploaded, error: uploadErr } = await supabase.storage
+          .from("member-photos")
+          .upload(path, file, { upsert: true });
+        if (!uploadErr && uploaded) {
+          const { data: urlData } = supabase.storage.from("member-photos").getPublicUrl(uploaded.path);
+          photoUrl = urlData.publicUrl;
+        }
+      }
+      setUploading(false);
+    }
+
     const res = await fetch(`/api/members/${member.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -273,6 +386,7 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
         birth_place: data.birth_place || null,
         death_date:  data.death_date  || null,
         bio:         data.bio         || null,
+        photo_url:   photoUrl,
       }),
     });
     if (!res.ok) {
@@ -285,38 +399,79 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
-      <p className="font-semibold text-gray-800">Modifier le membre</p>
       {submitError && (
-        <p className="text-red-600 text-xs bg-red-50 px-3 py-2 rounded-lg">{submitError}</p>
+        <p className="text-red-400 text-xs bg-red-900/30 px-3 py-2 rounded-lg">{submitError}</p>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <input {...register("first_name")} placeholder="Prénom" className={inputCls} />
-          {errors.first_name && <p className="text-red-500 text-xs mt-0.5">{errors.first_name.message}</p>}
+
+      {/* Photo */}
+      <div className="flex items-center gap-3">
+        <div className="w-12 h-12 rounded-full bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+          {preview
+            ? <img src={preview} alt="" className="w-full h-full object-cover" />
+            : <span className="text-xl text-slate-500">📷</span>
+          }
         </div>
-        <div>
-          <input {...register("last_name")} placeholder="Nom" className={inputCls} />
-          {errors.last_name && <p className="text-red-500 text-xs mt-0.5">{errors.last_name.message}</p>}
+        <div className="flex-1 min-w-0">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              setPreview(f ? URL.createObjectURL(f) : (member.photo_url ?? null));
+            }}
+            className="block w-full text-xs text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-indigo-900/50 file:text-indigo-300 hover:file:bg-indigo-900"
+          />
+          {preview && preview !== member.photo_url && (
+            <button type="button" onClick={() => { setPreview(member.photo_url ?? null); if (fileRef.current) fileRef.current.value = ""; }}
+              className="text-xs text-slate-500 hover:text-red-400 mt-0.5">
+              Annuler le changement
+            </button>
+          )}
         </div>
       </div>
-      <select {...register("gender")} className={inputCls}>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <input {...register("first_name")} placeholder="Prénom" className={darkInput} />
+          {errors.first_name && <p className="text-red-400 text-xs mt-0.5">{errors.first_name.message}</p>}
+        </div>
+        <div>
+          <input {...register("last_name")} placeholder="Nom" className={darkInput} />
+          {errors.last_name && <p className="text-red-400 text-xs mt-0.5">{errors.last_name.message}</p>}
+        </div>
+      </div>
+
+      <select {...register("gender")} className={darkInput + " [&>option]:bg-slate-800"}>
         <option value="">Genre —</option>
         <option value="male">Homme</option>
         <option value="female">Femme</option>
         <option value="other">Autre</option>
       </select>
-      <input {...register("birth_date")} type="date" className={inputCls} />
-      <input {...register("birth_place")} placeholder="Lieu de naissance" className={inputCls} />
-      <div>
-        <label className="block text-xs font-medium text-gray-500 mb-1">Date de décès</label>
-        <input {...register("death_date")} type="date" className={inputCls} />
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <p className="text-xs text-slate-500 mb-1">Naissance</p>
+          <input {...register("birth_date")} type="date" className={darkInput} />
+        </div>
+        <div>
+          <p className="text-xs text-slate-500 mb-1">Décès</p>
+          <input {...register("death_date")} type="date" className={darkInput} />
+        </div>
       </div>
-      <textarea {...register("bio")} placeholder="Biographie" rows={3} className={inputCls} />
-      <div className="flex gap-2">
-        <button type="submit" disabled={isSubmitting} className="flex-1 bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
-          {isSubmitting ? "Sauvegarde…" : "Sauvegarder"}
+
+      <input {...register("birth_place")} placeholder="Lieu de naissance" className={darkInput} />
+      <textarea {...register("bio")} placeholder="Biographie…" rows={2} className={darkInput + " resize-none"} />
+
+      <div className="flex gap-2 pt-1">
+        <button type="submit" disabled={isSubmitting || uploading}
+          className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-xl text-sm font-semibold disabled:opacity-50 transition-colors">
+          {uploading ? "Upload…" : isSubmitting ? "Sauvegarde…" : "Sauvegarder"}
         </button>
-        <button type="button" onClick={onCancel} className="px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Annuler</button>
+        <button type="button" onClick={onCancel}
+          className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:bg-white/5">
+          Annuler
+        </button>
       </div>
     </form>
   );
@@ -325,11 +480,11 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
 // ── Union 4 états ─────────────────────────────────────────────────
 type UnionState4 = "couple" | "ex-couple" | "marriage" | "divorce";
 
-const UNION_STATE_OPTIONS: { value: UnionState4; picto: string; label: string; bg: string; border: string }[] = [
-  { value: "couple",    picto: "♥",   label: "Couple",    bg: "bg-pink-50",   border: "border-pink-400" },
-  { value: "ex-couple", picto: "💔",  label: "Ex-couple", bg: "bg-gray-50",   border: "border-gray-400" },
-  { value: "marriage",  picto: "💍",  label: "Marié·e",   bg: "bg-yellow-50", border: "border-yellow-400" },
-  { value: "divorce",   picto: "💍✗", label: "Divorcé·e", bg: "bg-slate-50",  border: "border-slate-400" },
+const UNION_OPTS: { value: UnionState4; picto: string; label: string; active: string }[] = [
+  { value: "couple",    picto: "♥",   label: "Couple",    active: "bg-pink-600 border-pink-500 text-white" },
+  { value: "ex-couple", picto: "💔",  label: "Ex-couple", active: "bg-slate-600 border-slate-500 text-white" },
+  { value: "marriage",  picto: "💍",  label: "Marié·e",   active: "bg-amber-600 border-amber-500 text-white" },
+  { value: "divorce",   picto: "💍✗", label: "Divorcé·e", active: "bg-slate-700 border-slate-600 text-white" },
 ];
 
 function unionToState4(u: Spouse): UnionState4 {
@@ -346,35 +501,17 @@ function stateToBody(state: UnionState4, date: string) {
   };
 }
 
-function UnionStateSelector({ value, onChange }: { value: UnionState4; onChange: (v: UnionState4) => void }) {
-  return (
-    <div className="grid grid-cols-2 gap-2">
-      {UNION_STATE_OPTIONS.map(opt => (
-        <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
-          className={`flex flex-col items-center py-3 rounded-xl border-2 transition-all text-sm font-medium ${
-            value === opt.value ? `${opt.bg} ${opt.border} shadow-sm` : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
-          }`}>
-          <span className="text-xl mb-1">{opt.picto}</span>
-          <span>{opt.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ── Formulaire édition union ──────────────────────────────────────
 function EditUnionForm({ union, onCancel, onSuccess }: { union: Spouse; onCancel: () => void; onSuccess: (u: Spouse) => void }) {
   const [state, setState] = useState<UnionState4>(unionToState4(union));
   const [saveError, setSaveError] = useState<string | null>(null);
-
   const isSep = state === "ex-couple" || state === "divorce";
-  const existingDate = isSep
-    ? (union.separation_date?.slice(0, 10) ?? "")
-    : (union.union_date?.slice(0, 10) ?? "");
 
   const { register, handleSubmit, formState: { isSubmitting } } = useForm({
-    defaultValues: { date: existingDate },
+    defaultValues: { date: (isSep ? union.separation_date : union.union_date)?.slice(0, 10) ?? "" },
   });
+
+  const darkInput = "w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
   const onSubmit = async (data: { date: string }) => {
     setSaveError(null);
@@ -384,32 +521,43 @@ function EditUnionForm({ union, onCancel, onSuccess }: { union: Spouse; onCancel
       body: JSON.stringify(stateToBody(state, data.date)),
     });
     if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      setSaveError(j.error ?? "Erreur lors de la sauvegarde");
+      setSaveError((await res.json().catch(() => ({}))).error ?? "Erreur");
       return;
     }
     onSuccess(await res.json());
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <p className="font-semibold text-gray-800">Modifier l&apos;union</p>
-      {saveError && (
-        <p className="text-red-600 text-xs bg-red-50 px-3 py-2 rounded-lg">{saveError}</p>
-      )}
-      <UnionStateSelector value={state} onChange={setState} />
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {isSep ? "Date de séparation" : "Date de début"}
-        </label>
-        <input {...register("date")} type="date" className={inputCls} />
+    <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+      {saveError && <p className="text-red-400 text-xs bg-red-900/30 px-3 py-2 rounded-lg">{saveError}</p>}
+
+      <div className="grid grid-cols-2 gap-2">
+        {UNION_OPTS.map(opt => (
+          <button key={opt.value} type="button" onClick={() => setState(opt.value)}
+            className={`flex flex-col items-center py-2.5 rounded-xl border transition-all text-xs font-semibold ${
+              state === opt.value ? opt.active : "bg-white/5 border-white/10 text-slate-400 hover:bg-white/10"
+            }`}>
+            <span className="text-lg mb-0.5">{opt.picto}</span>
+            {opt.label}
+          </button>
+        ))}
       </div>
+
+      <div>
+        <p className="text-xs text-slate-500 mb-1">{isSep ? "Date de séparation" : "Date de début"} (optionnel)</p>
+        <input {...register("date")} type="date" className={darkInput} />
+      </div>
+
       <div className="flex gap-2">
-        <button type="submit" disabled={isSubmitting} className="flex-1 bg-pink-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-pink-700 disabled:opacity-50">
+        <button type="submit" disabled={isSubmitting}
+          className="flex-1 bg-pink-600 hover:bg-pink-500 text-white py-2 rounded-xl text-sm font-semibold disabled:opacity-50 transition-colors">
           {isSubmitting ? "Sauvegarde…" : "Sauvegarder"}
         </button>
-        <button type="button" onClick={onCancel} className="px-3 py-2 rounded-lg text-sm text-gray-500 hover:bg-gray-100">Annuler</button>
+        <button type="button" onClick={onCancel} className="px-3 py-2 rounded-xl text-sm text-slate-400 hover:bg-white/5">
+          Annuler
+        </button>
       </div>
     </form>
   );
 }
+

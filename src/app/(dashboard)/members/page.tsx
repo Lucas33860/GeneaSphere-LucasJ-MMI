@@ -35,6 +35,7 @@ export default function MembersPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [panel, setPanel] = useState<Panel>(null);
+  const [search, setSearch] = useState("");
   const [feedback, setFeedback] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
 
   const notify = (type: "ok" | "err", msg: string) => {
@@ -53,25 +54,60 @@ export default function MembersPage() {
 
   const togglePanel = (p: Panel) => setPanel(prev => prev === p ? null : p);
 
-  return (
-    <main className="min-h-screen bg-gray-50 py-8 px-4">
-      <div className="max-w-3xl mx-auto space-y-6">
+  const filtered = members.filter(m =>
+    `${m.first_name} ${m.last_name}`.toLowerCase().includes(search.toLowerCase())
+  );
 
-        {/* En-tête */}
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900">
-            Membres <span className="text-gray-400 text-lg font-normal">({members.length})</span>
-          </h1>
-          <div className="flex gap-2">
-            <Btn active={panel === "add"}   onClick={() => togglePanel("add")}>+ Ajouter</Btn>
-            <Btn active={panel === "union"} onClick={() => togglePanel("union")}>Union</Btn>
+  const living  = members.filter(m => !m.death_date).length;
+  const deceased = members.filter(m =>  m.death_date).length;
+
+  return (
+    <main className="min-h-screen bg-slate-50">
+
+      {/* ── Hero ────────────────────────────────────────────────── */}
+      <div className="bg-linear-to-br from-slate-900 via-blue-950 to-slate-900 px-4 py-10">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-white">Membres</h1>
+              <p className="text-slate-400 mt-1 text-sm">Gérez les personnes de votre arbre généalogique</p>
+            </div>
+            <div className="flex gap-3">
+              <HeroBtn active={panel === "add"} color="indigo" onClick={() => togglePanel("add")}>
+                + Ajouter
+              </HeroBtn>
+              <HeroBtn active={panel === "union"} color="pink" onClick={() => togglePanel("union")}>
+                💞 Union
+              </HeroBtn>
+            </div>
+          </div>
+
+          {/* Stats rapides */}
+          <div className="flex gap-6 mt-8">
+            {[
+              { label: "Total", value: members.length, icon: "👥" },
+              { label: "Vivants", value: living,  icon: "💚" },
+              { label: "Décédés", value: deceased, icon: "🕊️" },
+            ].map(({ label, value, icon }) => (
+              <div key={label} className="text-center">
+                <p className="text-2xl font-bold text-white">{value}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{icon} {label}</p>
+              </div>
+            ))}
           </div>
         </div>
+      </div>
+
+      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
 
         {/* Feedback */}
         {feedback && (
-          <div className={`text-sm px-4 py-2 rounded-lg ${feedback.type === "ok" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
-            {feedback.msg}
+          <div className={`text-sm px-4 py-3 rounded-xl font-medium ${
+            feedback.type === "ok"
+              ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+              : "bg-red-50 text-red-600 border border-red-100"
+          }`}>
+            {feedback.type === "ok" ? "✓ " : "✕ "}{feedback.msg}
           </div>
         )}
 
@@ -86,20 +122,51 @@ export default function MembersPage() {
         {panel === "union" && (
           <UnionForm
             members={members}
-            onSuccess={() => { notify("ok", "Union créée."); setPanel(null); }}
+            onSuccess={() => { notify("ok", "Union créée."); fetchMembers(); setPanel(null); }}
             onError={(m) => notify("err", m)}
           />
         )}
 
+        {/* Recherche */}
+        {members.length > 0 && (
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Rechercher un membre…"
+              className="w-full pl-9 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">✕</button>
+            )}
+          </div>
+        )}
+
         {/* Liste */}
         {loading ? (
-          <p className="text-gray-400 text-center py-12">Chargement…</p>
+          <div className="text-center py-16 space-y-3">
+            <div className="w-10 h-10 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-slate-400 text-sm">Chargement…</p>
+          </div>
         ) : members.length === 0 ? (
-          <p className="text-gray-400 text-center py-12">Aucun membre. Commencez par en ajouter un.</p>
+          <div className="text-center py-16 space-y-3">
+            <p className="text-5xl">👨‍👩‍👧‍👦</p>
+            <p className="text-slate-500 font-medium">Aucun membre pour l&apos;instant</p>
+            <p className="text-slate-400 text-sm">Commencez par ajouter la première personne de votre famille.</p>
+            <button
+              onClick={() => togglePanel("add")}
+              className="mt-2 px-5 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700"
+            >
+              + Ajouter un membre
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
+          <p className="text-center text-slate-400 py-8">Aucun résultat pour &quot;{search}&quot;</p>
         ) : (
-          <div className="grid gap-3">
-            {members.map(m => (
-              <MemberRow
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filtered.map(m => (
+              <MemberCard
                 key={m.id}
                 member={m}
                 members={members}
@@ -119,43 +186,45 @@ export default function MembersPage() {
   );
 }
 
-// ── Sous-composants ───────────────────────────────────────────────
-
-function Btn({ children, onClick, active }: { children: React.ReactNode; onClick: () => void; active?: boolean }) {
+// ── Hero button ───────────────────────────────────────────────────
+function HeroBtn({ children, onClick, active, color }: { children: React.ReactNode; onClick: () => void; active?: boolean; color: "indigo" | "pink" }) {
+  const base = color === "indigo"
+    ? active ? "bg-indigo-600 text-white" : "bg-white/10 text-white hover:bg-white/20"
+    : active ? "bg-pink-500 text-white" : "bg-white/10 text-white hover:bg-white/20";
   return (
-    <button
-      onClick={onClick}
-      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-        active ? "bg-blue-600 text-white" : "bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-      }`}
-    >
+    <button onClick={onClick} className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${base}`}>
       {children}
     </button>
   );
 }
 
+// ── Field helper ──────────────────────────────────────────────────
 function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
+      <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">{label}</label>
       {children}
       {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
     </div>
   );
 }
 
-// ── Ligne membre avec édition des parents inline ──────────────────
-function MemberRow({ member, members, onUpdate, onDelete }: { member: Member; members: Member[]; onUpdate: () => void; onDelete: () => void }) {
+// ── Carte membre ──────────────────────────────────────────────────
+function MemberCard({ member, members, onUpdate, onDelete }: { member: Member; members: Member[]; onUpdate: () => void; onDelete: () => void }) {
   const [editingParents, setEditingParents] = useState(false);
   const [fatherId, setFatherId] = useState(member.father_id ?? "");
   const [motherId, setMotherId] = useState(member.mother_id ?? "");
   const [saving, setSaving] = useState(false);
 
-  const genderMap: Record<string, string> = { male: "♂", female: "♀", other: "⚥" };
-  const gender = member.gender ? (genderMap[member.gender] ?? "") : "";
-
+  const genderIcon: Record<string, string> = { male: "♂", female: "♀", other: "⚥" };
   const father = members.find(m => m.id === member.father_id);
   const mother = members.find(m => m.id === member.mother_id);
+
+  const age = member.birth_date
+    ? (member.death_date
+        ? new Date(member.death_date).getFullYear() - new Date(member.birth_date).getFullYear()
+        : new Date().getFullYear() - new Date(member.birth_date).getFullYear())
+    : null;
 
   const saveParents = async () => {
     setSaving(true);
@@ -170,90 +239,103 @@ function MemberRow({ member, members, onUpdate, onDelete }: { member: Member; me
   };
 
   return (
-    <div className="bg-white border border-gray-100 rounded-xl p-4 space-y-2">
-      <div className="flex items-center gap-4">
-        <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 font-bold flex items-center justify-center text-sm shrink-0 overflow-hidden">
+    <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+      {/* Header de la carte */}
+      <div className="px-4 pt-4 pb-3 flex items-center gap-3">
+        <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-lg shrink-0 overflow-hidden border-2 border-white shadow-sm">
           {member.photo_url
             ? <img src={member.photo_url} alt={member.first_name} className="w-full h-full object-cover" />
             : <>{member.first_name[0]}{member.last_name[0]}</>
           }
         </div>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900">
-            {member.first_name} {member.last_name} {gender}
-            {member.death_date && <span className="ml-1 text-gray-400 font-normal">†</span>}
+          <p className="font-bold text-slate-900 truncate">
+            {member.first_name} {member.last_name.toUpperCase()}
           </p>
-          <p className="text-xs text-gray-400">
-            {member.birth_date && <>Né(e) le {new Date(member.birth_date).toLocaleDateString("fr-FR")}{member.birth_place ? ` — ${member.birth_place}` : ""}</>}
-            {member.birth_date && member.death_date && " · "}
-            {member.death_date && <>Décédé(e) le {new Date(member.death_date).toLocaleDateString("fr-FR")}</>}
+          <p className="text-xs text-slate-400">
+            {member.gender ? genderIcon[member.gender] : ""}
+            {age != null ? ` · ${age} ans` : ""}
+            {member.death_date ? " · †" : ""}
           </p>
-          {(father || mother) && !editingParents && (
-            <p className="text-xs text-gray-400 mt-0.5">
-              {father && <>Père : {father.first_name} {father.last_name}</>}
-              {father && mother && " · "}
-              {mother && <>Mère : {mother.first_name} {mother.last_name}</>}
-            </p>
-          )}
         </div>
-        <div className="flex items-center gap-2">
-          {member.death_date && (
-            <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">Décédé(e)</span>
-          )}
-          {member.is_private && (
-            <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">Privé</span>
-          )}
-          <button
-            onClick={() => setEditingParents(p => !p)}
-            className="text-xs text-blue-500 hover:text-blue-700 underline"
-          >
-            {editingParents ? "Annuler" : "Parents"}
-          </button>
-          <button
-            onClick={onDelete}
-            className="text-xs text-red-400 hover:text-red-600 underline"
-          >
-            Supprimer
-          </button>
-        </div>
+        {member.is_private && (
+          <span className="text-xs bg-amber-50 text-amber-600 border border-amber-100 px-2 py-0.5 rounded-lg shrink-0">Privé</span>
+        )}
       </div>
 
+      {/* Infos */}
+      <div className="px-4 pb-3 space-y-1">
+        {member.birth_date && (
+          <p className="text-xs text-slate-400">
+            🎂 {new Date(member.birth_date).toLocaleDateString("fr-FR")}
+            {member.birth_place ? ` — ${member.birth_place}` : ""}
+          </p>
+        )}
+        {member.death_date && (
+          <p className="text-xs text-slate-400">🕊️ {new Date(member.death_date).toLocaleDateString("fr-FR")}</p>
+        )}
+        {(father || mother) && !editingParents && (
+          <p className="text-xs text-slate-400 truncate">
+            {father && `👨 ${father.first_name} ${father.last_name}`}
+            {father && mother && " · "}
+            {mother && `👩 ${mother.first_name} ${mother.last_name}`}
+          </p>
+        )}
+      </div>
+
+      {/* Édition parents */}
       {editingParents && (
-        <div className="border-t border-gray-100 pt-3 grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Père</label>
-            <select value={fatherId} onChange={e => setFatherId(e.target.value)} className={inputCls}>
-              <option value="">— Aucun —</option>
-              {members.filter(m => m.id !== member.id).map(m => (
-                <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
-              ))}
-            </select>
+        <div className="border-t border-slate-100 px-4 py-3 bg-slate-50 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">Père</label>
+              <select value={fatherId} onChange={e => setFatherId(e.target.value)} className={inputCls}>
+                <option value="">— Aucun —</option>
+                {members.filter(m => m.id !== member.id).map(m => (
+                  <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">Mère</label>
+              <select value={motherId} onChange={e => setMotherId(e.target.value)} className={inputCls}>
+                <option value="">— Aucune —</option>
+                {members.filter(m => m.id !== member.id).map(m => (
+                  <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
+                ))}
+              </select>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Mère</label>
-            <select value={motherId} onChange={e => setMotherId(e.target.value)} className={inputCls}>
-              <option value="">— Aucune —</option>
-              {members.filter(m => m.id !== member.id).map(m => (
-                <option key={m.id} value={m.id}>{m.first_name} {m.last_name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="col-span-2">
-            <button
-              onClick={saveParents}
-              disabled={saving}
-              className="w-full bg-blue-600 text-white py-1.5 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-            >
-              {saving ? "Sauvegarde…" : "Enregistrer les parents"}
-            </button>
-          </div>
+          <button
+            onClick={saveParents}
+            disabled={saving}
+            className="w-full bg-indigo-600 text-white py-1.5 rounded-lg text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {saving ? "Sauvegarde…" : "Enregistrer"}
+          </button>
         </div>
       )}
+
+      {/* Actions */}
+      <div className="border-t border-slate-100 px-4 py-2 flex items-center justify-between">
+        <button
+          onClick={() => setEditingParents(p => !p)}
+          className="text-xs text-indigo-500 hover:text-indigo-700 font-medium"
+        >
+          {editingParents ? "Annuler" : "⊕ Parents"}
+        </button>
+        <button
+          onClick={onDelete}
+          className="text-xs text-red-400 hover:text-red-600 font-medium"
+        >
+          Supprimer
+        </button>
+      </div>
     </div>
   );
 }
 
-// ── Formulaire : ajouter un membre (avec parents + photo) ─────────
+// ── Formulaire : ajouter un membre ────────────────────────────────
 function AddMemberForm({ members, onSuccess, onError }: {
   members: Member[];
   onSuccess: () => void;
@@ -269,7 +351,6 @@ function AddMemberForm({ members, onSuccess, onError }: {
   const onSubmit = async (data: AddMemberInput) => {
     let photoUrl: string | null = null;
 
-    // ── Upload photo si sélectionnée ──────────────────────────────
     const file = fileRef.current?.files?.[0];
     if (file) {
       setUploading(true);
@@ -312,19 +393,19 @@ function AddMemberForm({ members, onSuccess, onError }: {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="bg-white border border-gray-100 rounded-xl p-5 space-y-4">
-      <h2 className="font-semibold text-gray-800">Ajouter un membre</h2>
+    <form onSubmit={handleSubmit(onSubmit)} className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
+      <h2 className="font-bold text-slate-900 text-lg">Ajouter un membre</h2>
 
       {/* Photo */}
       <div className="flex items-center gap-4">
-        <div className="w-16 h-16 rounded-full bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden shrink-0">
+        <div className="w-16 h-16 rounded-full bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center overflow-hidden shrink-0">
           {preview
             ? <img src={preview} alt="aperçu" className="w-full h-full object-cover" />
-            : <span className="text-2xl text-gray-300">📷</span>
+            : <span className="text-2xl text-slate-300">📷</span>
           }
         </div>
-        <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Photo</label>
+        <div>
+          <p className="text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">Photo (optionnel)</p>
           <input
             ref={fileRef}
             type="file"
@@ -333,7 +414,7 @@ function AddMemberForm({ members, onSuccess, onError }: {
               const f = e.target.files?.[0];
               setPreview(f ? URL.createObjectURL(f) : null);
             }}
-            className="block w-full text-sm text-gray-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            className="block w-full text-xs text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
           />
         </div>
       </div>
@@ -370,10 +451,9 @@ function AddMemberForm({ members, onSuccess, onError }: {
         </Field>
       </div>
 
-      {/* Parents */}
       {members.length > 0 && (
-        <div className="border-t border-gray-100 pt-4 space-y-3">
-          <p className="text-sm font-medium text-gray-700">Parents (optionnel)</p>
+        <div className="border-t border-slate-100 pt-4 space-y-3">
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Parents (optionnel)</p>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Père">
               <select {...register("father_id")} className={inputCls}>
@@ -398,7 +478,7 @@ function AddMemberForm({ members, onSuccess, onError }: {
       <button
         type="submit"
         disabled={isSubmitting || uploading}
-        className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+        className="w-full bg-indigo-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
       >
         {uploading ? "Upload photo…" : isSubmitting ? "Ajout…" : "Ajouter le membre"}
       </button>
@@ -436,20 +516,22 @@ function UnionForm({ members, onSuccess, onError }: {
   };
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="bg-white border border-gray-100 rounded-xl p-5 space-y-4">
-      <h2 className="font-semibold text-gray-800">Créer une union</h2>
-      <div className="flex gap-2">
+    <form onSubmit={handleSubmit(onSubmit)} className="bg-white border border-slate-100 rounded-2xl shadow-sm p-6 space-y-5">
+      <h2 className="font-bold text-slate-900 text-lg">Créer une union</h2>
+
+      <div className="flex gap-2 p-1 bg-slate-100 rounded-xl">
         {(["ensemble", "séparé"] as const).map(s => (
           <button key={s} type="button" onClick={() => setStatut(s)}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
+            className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
               statut === s
-                ? s === "ensemble" ? "bg-pink-500 text-white border-pink-500" : "bg-gray-400 text-white border-gray-400"
-                : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+                ? s === "ensemble" ? "bg-pink-500 text-white shadow-sm" : "bg-slate-500 text-white shadow-sm"
+                : "text-slate-500 hover:text-slate-700"
             }`}>
-            {s === "ensemble" ? "♥ Ensemble" : "✗ Séparé"}
+            {s === "ensemble" ? "♥ Ensemble" : "✗ Séparé·e"}
           </button>
         ))}
       </div>
+
       <div className="grid grid-cols-2 gap-4">
         {(["member1_id", "member2_id"] as const).map((name, i) => (
           <Field key={name} label={`Membre ${i + 1} *`} error={errors[name]?.message}>
@@ -460,10 +542,13 @@ function UnionForm({ members, onSuccess, onError }: {
           </Field>
         ))}
       </div>
-      <Field label={statut === "ensemble" ? "Date de début" : "Date de séparation"}>
+
+      <Field label={statut === "ensemble" ? "Date de début (optionnel)" : "Date de séparation (optionnel)"}>
         <input {...register("union_date")} type="date" className={inputCls} />
       </Field>
-      <button type="submit" disabled={isSubmitting} className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+
+      <button type="submit" disabled={isSubmitting}
+        className="w-full bg-pink-500 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-pink-600 disabled:opacity-50 transition-colors">
         {isSubmitting ? "Enregistrement…" : "Créer l'union"}
       </button>
     </form>
