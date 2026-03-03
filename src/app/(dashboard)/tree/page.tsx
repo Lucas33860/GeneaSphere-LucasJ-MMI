@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { FamilyTree3D } from "@/components/tree/FamilyTree3D";
+import { FamilyTree3D, type ViewMode } from "@/components/tree/FamilyTree3D";
 import type { Member, Spouse } from "@/types";
 import { darkInputCls } from "@/lib/ui";
 import { uploadMemberPhoto } from "@/lib/supabase/storage";
@@ -27,13 +27,15 @@ export default function TreePage() {
   const [members, setMembers]       = useState<Member[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [memberError, setMemberError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [resetKey, setResetKey]       = useState(0);
+  const [sidebarOpen, setSidebarOpen]     = useState(false);
+  const [resetKey, setResetKey]           = useState(0);
+  const [viewMode, setViewMode]           = useState<ViewMode>("free");
+  const [showNavHistory, setShowNavHistory] = useState(false);
   const [importStatus, setImportStatus] = useState<{ type: "ok" | "err" | "loading"; msg: string } | null>(null);
   const importRef = useRef<HTMLInputElement>(null);
 
   const [panel, setPanel] = useState<
-    { type: "member"; data: Member; editing: boolean } |
+    { type: "member"; data: Member; editing: boolean; history?: boolean } |
     { type: "union";  data: Spouse; editing: boolean } |
     null
   >(null);
@@ -158,14 +160,35 @@ export default function TreePage() {
           {/* Séparateur */}
           <div className="w-px h-5 bg-white/10 mx-1" />
 
+          {/* Boutons vues caméra */}
+          {(["free","top","front","side"] as ViewMode[]).map(m => (
+            <button key={m} onClick={() => setViewMode(m)}
+              className={`px-2 py-1 text-xs rounded font-medium transition-colors ${viewMode === m ? "bg-indigo-600 text-white" : "text-slate-400 hover:bg-white/10"}`}>
+              {{ free: "3D", top: "Y↑", front: "Z→", side: "X→" }[m]}
+            </button>
+          ))}
+
+          {/* Séparateur */}
+          <div className="w-px h-5 bg-white/10 mx-1" />
+
           {/* Reset arbre */}
           <button
             title="Ferme les branches ouvertes et revient à la vue initiale de la personne sélectionnée"
-            onClick={() => { setResetKey(k => k + 1); setPanel(null); }}
+            onClick={() => { setResetKey(k => k + 1); setViewMode("free"); setPanel(null); }}
             className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
             <span className="text-sm">🔄</span>
             <span className="text-[10px] leading-none">Réinitialiser</span>
+          </button>
+
+          {/* Historique navigation */}
+          <button
+            title="Afficher / masquer l'historique de navigation"
+            onClick={() => setShowNavHistory(v => !v)}
+            className={`flex flex-col items-center gap-0.5 px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors ${showNavHistory ? "text-indigo-400" : "text-slate-400 hover:text-white"}`}
+          >
+            <span className="text-sm">⏱</span>
+            <span className="text-[10px] leading-none">Historique</span>
           </button>
 
           {/* Export JSON */}
@@ -216,6 +239,8 @@ export default function TreePage() {
           <FamilyTree3D
             rootId={selectedId}
             resetKey={resetKey}
+            viewMode={viewMode}
+            showHistory={showNavHistory}
             onSelectMember={handleSelectMember}
             onSelectUnion={handleSelectUnion}
           />
@@ -242,16 +267,39 @@ export default function TreePage() {
           </div>
         )}
 
+        {/* Bouton reset flottant */}
+        <button
+          onClick={() => { setResetKey(k => k + 1); setViewMode("free"); setPanel(null); }}
+          title="Réinitialiser la caméra et l'arbre"
+          className="absolute bottom-4 right-4 z-20 bg-slate-800/80 hover:bg-slate-700 text-white p-3 rounded-full shadow-xl border border-white/10 text-lg"
+        >
+          🎯
+        </button>
+
         {/* ── Panneau info/édition ──────────────────────────── */}
         {panel && (
           <div className="absolute top-3 left-3 z-20 w-80 bg-slate-900/95 backdrop-blur border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
 
             {/* Panneau MEMBRE — vue */}
-            {panel.type === "member" && !panel.editing && (
+            {panel.type === "member" && !panel.editing && !panel.history && (
               <MemberPanel
                 member={panel.data}
                 members={members}
                 onEdit={() => setPanel({ ...panel, editing: true })}
+                onHistory={() => setPanel({ ...panel, history: true })}
+                onClose={() => setPanel(null)}
+              />
+            )}
+
+            {/* Panneau MEMBRE — historique */}
+            {panel.type === "member" && !panel.editing && panel.history && (
+              <MemberHistoryPanel
+                member={panel.data}
+                onBack={() => setPanel({ ...panel, history: false })}
+                onRestored={updated => {
+                  setPanel({ type: "member", data: updated, editing: false });
+                  setMembers(prev => prev.map(m => m.id === updated.id ? updated : m));
+                }}
                 onClose={() => setPanel(null)}
               />
             )}
@@ -305,8 +353,8 @@ export default function TreePage() {
 }
 
 // ── Panneau membre ────────────────────────────────────────────────
-function MemberPanel({ member, members, onEdit, onClose }: {
-  member: Member; members: Member[]; onEdit: () => void; onClose: () => void;
+function MemberPanel({ member, members, onEdit, onHistory, onClose }: {
+  member: Member; members: Member[]; onEdit: () => void; onHistory: () => void; onClose: () => void;
 }) {
   const father = members.find(m => m.id === member.father_id);
   const mother = members.find(m => m.id === member.mother_id);
@@ -379,6 +427,160 @@ function MemberPanel({ member, members, onEdit, onClose }: {
         >
           Modifier
         </button>
+        <button
+          onClick={onHistory}
+          className="w-full bg-slate-700/50 hover:bg-slate-700 text-slate-300 py-2 rounded-xl text-sm font-medium transition-colors mt-1"
+        >
+          Historique
+        </button>
+      </div>
+    </>
+  );
+}
+
+// ── Historique membre : types + helpers ───────────────────────────
+interface MemberHistoryEntry {
+  id: string;
+  member_id: string;
+  first_name: string;
+  last_name: string;
+  gender: string | null;
+  birth_date: string | null;
+  death_date: string | null;
+  birth_place: string | null;
+  photo_url: string | null;
+  bio: string | null;
+  is_private: boolean | null;
+  changed_at: string;
+  change_type: string;
+}
+
+type HistoryLike = {
+  first_name: string; last_name: string; gender: string | null;
+  birth_date: string | null; death_date: string | null; birth_place: string | null;
+  bio: string | null; is_private: boolean | null; photo_url: string | null;
+};
+
+const GENDER_LABELS: Record<string, string> = { male: "Homme", female: "Femme", other: "Autre" };
+const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString("fr-FR") : "—";
+const trunc = (s: string | null, n = 45) => !s ? "—" : s.length > n ? s.slice(0, n) + "…" : s;
+
+function buildDiff(before: HistoryLike, after: HistoryLike): string[] {
+  const diffs: string[] = [];
+  if (before.first_name !== after.first_name)
+    diffs.push(`Prénom : ${before.first_name} → ${after.first_name}`);
+  if (before.last_name !== after.last_name)
+    diffs.push(`Nom : ${before.last_name} → ${after.last_name}`);
+  if (before.gender !== after.gender)
+    diffs.push(`Genre : ${GENDER_LABELS[before.gender ?? ""] ?? "—"} → ${GENDER_LABELS[after.gender ?? ""] ?? "—"}`);
+  if (before.birth_date !== after.birth_date)
+    diffs.push(`Naissance : ${fmtDate(before.birth_date)} → ${fmtDate(after.birth_date)}`);
+  if (before.death_date !== after.death_date)
+    diffs.push(`Décès : ${fmtDate(before.death_date)} → ${fmtDate(after.death_date)}`);
+  if (before.birth_place !== after.birth_place)
+    diffs.push(`Lieu naiss. : ${before.birth_place ?? "—"} → ${after.birth_place ?? "—"}`);
+  if (before.bio !== after.bio)
+    diffs.push(`Bio : « ${trunc(before.bio)} » → « ${trunc(after.bio)} »`);
+  if (before.is_private !== after.is_private)
+    diffs.push(`Visibilité : ${before.is_private ? "Privé" : "Public"} → ${after.is_private ? "Privé" : "Public"}`);
+  if (before.photo_url !== after.photo_url)
+    diffs.push("Photo : mise à jour");
+  return diffs;
+}
+
+// ── Panneau historique membre ─────────────────────────────────────
+function MemberHistoryPanel({ member, onBack, onRestored, onClose }: {
+  member: Member; onBack: () => void; onRestored: (m: Member) => void; onClose: () => void;
+}) {
+  const [history, setHistory] = useState<MemberHistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/members/${member.id}/history`)
+      .then(r => r.json())
+      .then((data: MemberHistoryEntry[]) => { setHistory(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [member.id]);
+
+  const handleRestore = async (hid: string) => {
+    setRestoring(hid);
+    const res = await fetch(`/api/members/${member.id}/restore/${hid}`, { method: "POST" });
+    if (res.ok) {
+      const updated: Member = await res.json();
+      // Rafraîchir l'historique (l'entrée restaurée n'est plus enregistrée)
+      const histRes = await fetch(`/api/members/${member.id}/history`);
+      if (histRes.ok) setHistory(await histRes.json());
+      onRestored(updated);
+    }
+    setRestoring(null);
+  };
+
+  return (
+    <>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+        <div className="flex items-center gap-2">
+          <button onClick={onBack} className="text-slate-400 hover:text-white text-xs">← Retour</button>
+          <p className="font-bold text-white text-sm">Historique</p>
+        </div>
+        <button onClick={onClose} className="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+      <div className="p-3 max-h-96 overflow-y-auto space-y-2">
+        {loading && <p className="text-slate-500 text-xs text-center py-4">Chargement…</p>}
+        {!loading && history.length === 0 && (
+          <p className="text-slate-500 text-xs text-center py-4">Aucun historique disponible</p>
+        )}
+
+        {/* Version actuelle */}
+        {!loading && history.length > 0 && (
+          <div className="bg-indigo-600/10 border border-indigo-500/20 rounded-xl p-3 text-xs">
+            <p className="text-indigo-400 font-semibold mb-1">Version actuelle</p>
+            <p className="text-white font-medium">{member.first_name} {member.last_name.toUpperCase()}</p>
+            {member.birth_date && <p className="text-slate-400 mt-0.5">Né·e le {fmtDate(member.birth_date)}{member.birth_place ? ` à ${member.birth_place}` : ""}</p>}
+            {member.bio && <p className="text-slate-500 mt-0.5 italic">{trunc(member.bio, 60)}</p>}
+          </div>
+        )}
+
+        {history.map((entry, i) => {
+          // afterState = état APRÈS la modification sauvegardée dans cette entrée
+          // i=0 → l'état après = la version actuelle (member)
+          // i>0 → l'état après = l'entrée précédente dans la liste (history[i-1])
+          const afterState: HistoryLike = i === 0 ? member : history[i - 1];
+          const diffs = buildDiff(entry, afterState);
+
+          return (
+            <div key={entry.id} className="bg-white/5 rounded-xl p-3 text-xs space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 text-[11px]">
+                  {new Date(entry.changed_at).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+                </span>
+                <button
+                  onClick={() => handleRestore(entry.id)}
+                  disabled={restoring === entry.id}
+                  className="text-[11px] font-semibold bg-slate-700 hover:bg-indigo-600 text-slate-300 hover:text-white px-2 py-0.5 rounded-lg transition-colors disabled:opacity-40"
+                >
+                  {restoring === entry.id ? "…" : "Restaurer"}
+                </button>
+              </div>
+
+              <p className="text-slate-300 font-semibold">{entry.first_name} {entry.last_name.toUpperCase()}</p>
+
+              {diffs.length > 0 ? (
+                <ul className="space-y-1 pt-0.5">
+                  {diffs.map((d, j) => (
+                    <li key={j} className="text-slate-400 leading-snug">
+                      <span className="text-slate-600">•</span> {d}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-slate-600 italic">
+                  {i === history.length - 1 ? "Première version enregistrée" : "Aucune différence détectable"}
+                </p>
+              )}
+            </div>
+          );
+        })}
       </div>
     </>
   );

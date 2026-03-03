@@ -27,6 +27,16 @@ export async function PATCH(request: Request, { params }: Params) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
+  // Snapshot l'état courant avant modification
+  const { data: old } = await supabase.from("members").select("*").eq("id", id).single();
+  if (old) {
+    const { id: _id, created_at: _ca, updated_at: _ua, created_by: _cb, ...fields } = old;
+    await supabase.from("member_history").insert({
+      member_id: id, ...fields,
+      changed_by: user.id, change_type: "update",
+    });
+  }
+
   const { data, error } = await supabase
     .from("members")
     .update(parsed.data)

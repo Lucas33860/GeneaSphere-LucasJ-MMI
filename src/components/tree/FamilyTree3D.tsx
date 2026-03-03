@@ -12,16 +12,27 @@ interface GraphPerson {
   member: Member;
   pos: [number, number, number];
   expanded: boolean;
+  birthTime: number;
 }
 interface GraphUnion {
   id: string;
   union: Spouse | null;
   pos: [number, number, number];
+  birthTime: number;
 }
 interface GraphEdge {
   id: string;
   from: [number, number, number];
   to: [number, number, number];
+}
+export interface NavEntry {
+  id: string;
+  label: string;
+  time: number;
+  persons: GraphPerson[];
+  unions: GraphUnion[];
+  edges: GraphEdge[];
+  expanded: string[];
 }
 
 // Correspond exactement à la réponse de /api/tree
@@ -110,8 +121,11 @@ function PersonSphere({ node, onClick }: {
 
   useFrame(() => {
     if (!meshRef.current) return;
-    const t = hovered ? 1.15 : 1;
-    meshRef.current.scale.lerp(new THREE.Vector3(t, t, t), 0.1);
+    const elapsed = (Date.now() - node.birthTime) / 900;
+    const s = Math.min(elapsed, 1);
+    const eased = s < 0.5 ? 2 * s * s : -1 + (4 - 2 * s) * s;
+    const target = (hovered ? 1.15 : 1) * eased;
+    meshRef.current.scale.lerp(new THREE.Vector3(target, target, target), 0.10);
   });
 
   return (
@@ -166,8 +180,11 @@ function UnionSphere({ node, onClick }: { node: GraphUnion; onClick?: (u: Spouse
 
   useFrame(() => {
     if (!meshRef.current) return;
-    const t = hovered ? 1.3 : 1;
-    meshRef.current.scale.lerp(new THREE.Vector3(t, t, t), 0.12);
+    const elapsed = (Date.now() - node.birthTime) / 900;
+    const s = Math.min(elapsed, 1);
+    const eased = s < 0.5 ? 2 * s * s : -1 + (4 - 2 * s) * s;
+    const target = (hovered ? 1.3 : 1) * eased;
+    meshRef.current.scale.lerp(new THREE.Vector3(target, target, target), 0.10);
   });
 
   return (
@@ -221,20 +238,75 @@ function CameraReset({ trigger }: { trigger: number }) {
   return null;
 }
 
+// ── CameraPresetController ────────────────────────────────────────
+export type ViewMode = "free" | "top" | "front" | "side";
+
+function CameraPresetController({ mode }: { mode: ViewMode }) {
+  const { camera, controls } = useThree();
+  useEffect(() => {
+    const ctrl = controls as unknown as {
+      target: THREE.Vector3; update: () => void;
+      minPolarAngle: number; maxPolarAngle: number;
+      minAzimuthAngle: number; maxAzimuthAngle: number;
+      enableRotate: boolean;
+      mouseButtons: { LEFT: number; MIDDLE: number; RIGHT: number };
+    };
+    if (!ctrl) return;
+    const t = ctrl.target.clone();
+    const dist = Math.max(camera.position.distanceTo(ctrl.target), 45);
+
+    if (mode === "top") {
+      camera.position.set(t.x, t.y + dist, t.z + 0.001);
+      ctrl.minPolarAngle = ctrl.maxPolarAngle = 0;
+      ctrl.minAzimuthAngle = -Infinity; ctrl.maxAzimuthAngle = Infinity;
+      ctrl.enableRotate = false;
+    } else if (mode === "front") {
+      camera.position.set(t.x, t.y, t.z + dist);
+      ctrl.minPolarAngle = ctrl.maxPolarAngle = Math.PI / 2;
+      ctrl.minAzimuthAngle = -Infinity; ctrl.maxAzimuthAngle = Infinity;
+      ctrl.enableRotate = false;
+    } else if (mode === "side") {
+      camera.position.set(t.x + dist, t.y, t.z);
+      ctrl.minPolarAngle = ctrl.maxPolarAngle = Math.PI / 2;
+      ctrl.minAzimuthAngle = -Infinity; ctrl.maxAzimuthAngle = Infinity;
+      ctrl.enableRotate = false;
+    } else {
+      ctrl.minPolarAngle = 0; ctrl.maxPolarAngle = Math.PI;
+      ctrl.minAzimuthAngle = -Infinity; ctrl.maxAzimuthAngle = Infinity;
+      ctrl.enableRotate = true;
+    }
+
+    // En mode verrouillé : clic gauche = pan (déplacement dans le plan de la vue)
+    // En mode libre : clic gauche = rotation (comportement par défaut)
+    const locked = mode !== "free";
+    ctrl.mouseButtons = {
+      LEFT:   locked ? THREE.MOUSE.PAN    : THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.DOLLY,
+      RIGHT:  THREE.MOUSE.PAN,
+    };
+
+    ctrl.update();
+  }, [mode, camera, controls]);
+  return null;
+}
+
 // ── Props ─────────────────────────────────────────────────────────
 interface FamilyTree3DProps {
   rootId: string;
   resetKey?: number;
+  viewMode?: ViewMode;
+  showHistory?: boolean;
   onSelectMember: (m: Member) => void;
   onSelectUnion?: (u: Spouse) => void;
 }
 
 // ── Composant principal ───────────────────────────────────────────
-export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }: FamilyTree3DProps) {
+export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory = false, onSelectMember, onSelectUnion }: FamilyTree3DProps) {
   const [persons, setPersons] = useState<GraphPerson[]>([]);
   const [unions,  setUnions]  = useState<GraphUnion[]>([]);
   const [edges,   setEdges]   = useState<GraphEdge[]>([]);
   const [cameraReset, setCameraReset] = useState(0);
+  const [autoRotate, setAutoRotate]   = useState(true);
 
   const expandedRef    = useRef<Set<string>>(new Set());
   const personIdsRef   = useRef<Set<string>>(new Set());
@@ -247,8 +319,20 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
 
   const focusTargetRef = useRef<THREE.Vector3 | null>(null);
 
+  // Miroirs synchrones des états React (lecture sans stale closure)
+  const personsRef = useRef<GraphPerson[]>([]);
+  const unionsRef  = useRef<GraphUnion[]>([]);
+  const edgesRef   = useRef<GraphEdge[]>([]);
+
+  // Historique navigation (Ctrl+Z + panneau visuel)
+  const navHistoryRef = useRef<NavEntry[]>([]);
+  const [navEntries, setNavEntries] = useState<NavEntry[]>([]);;
+
   useEffect(() => {
     setPersons([]); setUnions([]); setEdges([]);
+    personsRef.current = []; unionsRef.current = []; edgesRef.current = [];
+    navHistoryRef.current = [];
+    setNavEntries([]);
     expandedRef.current    = new Set();
     personIdsRef.current   = new Set();
     unionIdsRef.current    = new Set();
@@ -257,8 +341,16 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
     personPosRef.current   = new Map();
     unionPosRef.current    = new Map();
     setCameraReset(n => n + 1);
+    setAutoRotate(true);
+    const t = setTimeout(() => setAutoRotate(false), 3000);
+    return () => clearTimeout(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootId, resetKey]);
+
+  // Garder les refs synchronisées
+  useEffect(() => { personsRef.current = persons; }, [persons]);
+  useEffect(() => { unionsRef.current  = unions;  }, [unions]);
+  useEffect(() => { edgesRef.current   = edges;   }, [edges]);
 
   const expandNode = useCallback(async (
     personId: string,
@@ -270,6 +362,20 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
     const res = await fetch(`/api/tree?person_id=${personId}`);
     if (!res.ok) return;
     const data: TreeData = await res.json();
+
+    // Sauvegarder l'état AVANT l'expansion (on a le nom maintenant)
+    const navEntry: NavEntry = {
+      id: `${personId}-${Date.now()}`,
+      label: `${data.person.first_name} ${data.person.last_name.toUpperCase()}`,
+      time: Date.now(),
+      persons: [...personsRef.current],
+      unions:  [...unionsRef.current],
+      edges:   [...edgesRef.current],
+      expanded: [...expandedRef.current].filter(id => id !== personId),
+    };
+    navHistoryRef.current = [...navHistoryRef.current, navEntry];
+    if (navHistoryRef.current.length > 25) navHistoryRef.current.shift();
+    setNavEntries([...navHistoryRef.current]);
 
     const newPersons: GraphPerson[] = [];
     const newUnions:  GraphUnion[]  = [];
@@ -283,7 +389,7 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
       const actual = findFreePos(desired, occupiedPosRef.current);
       occupiedPosRef.current.push(actual);
       personPosRef.current.set(m.id, actual);
-      newPersons.push({ id: m.id, member: m, pos: actual, expanded: false });
+      newPersons.push({ id: m.id, member: m, pos: actual, expanded: false, birthTime: Date.now() });
       return actual;
     };
 
@@ -297,7 +403,7 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
       }
       unionIdsRef.current.add(id);
       unionPosRef.current.set(id, desiredPos);
-      newUnions.push({ id, union, pos: desiredPos });
+      newUnions.push({ id, union, pos: desiredPos, birthTime: Date.now() });
       return desiredPos;
     };
 
@@ -314,7 +420,7 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
         const actual = findFreePos(basePos, occupiedPosRef.current);
         occupiedPosRef.current.push(actual);
         personPosRef.current.set(personId, actual);
-        newPersons.push({ id: personId, member: data.person, pos: actual, expanded: true });
+        newPersons.push({ id: personId, member: data.person, pos: actual, expanded: true, birthTime: Date.now() });
         return actual;
       }
       setPersons(prev => prev.map(p => p.id === personId ? { ...p, expanded: true } : p));
@@ -630,9 +736,133 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
       });
     });
 
-    if (newPersons.length > 0) setPersons(prev => [...prev, ...newPersons]);
-    if (newUnions.length  > 0) setUnions(prev  => [...prev, ...newUnions]);
-    if (newEdges.length   > 0) setEdges(prev   => [...prev, ...newEdges]);
+    // ── Dispatch séquentiel organique (comme un arbre qui pousse) ──
+    const now = Date.now();
+    const STEP = 650; // ms entre chaque apparition
+
+    // Helper : envoie des nœuds + edges après un délai, avec birthTime pour l'anim spawn
+    const send = (
+      ps: GraphPerson[], us: GraphUnion[], es: GraphEdge[], delayMs: number,
+    ) => {
+      const bt = now + delayMs;
+      setTimeout(() => {
+        if (ps.length) setPersons(prev => [...prev, ...ps.map(p => ({ ...p, birthTime: bt }))]);
+        if (us.length) setUnions(prev  => [...prev, ...us.map(u => ({ ...u, birthTime: bt }))]);
+        if (es.length) setEdges(prev   => [...prev, ...es]);
+      }, delayMs);
+    };
+
+    // Triage des nœuds
+    const selfNode   = newPersons.find(p => p.id === personId);
+    const fatherNode = data.father ? newPersons.find(p => p.id === data.father!.id) : null;
+    const motherNode = data.mother ? newPersons.find(p => p.id === data.mother!.id) : null;
+    const parentUnionNode = newUnions.find(u => u.id === puid);
+
+    // Edges liées aux parents (toutes apparaissent avec le nœud union pour "connecter" d'un coup)
+    const parentEdges = newEdges.filter(e =>
+      (data.father && e.id.includes(`f-${data.father.id}`)) ||
+      (data.mother && e.id.includes(`m-${data.mother.id}`)) ||
+      e.id === `e-pu-${puid}-${personId}` ||   // union → moi (fix : inclut le puid exact)
+      e.id.startsWith(`e-single`)
+    );
+    const parentEdgeIds = new Set(parentEdges.map(e => e.id));
+
+    // Siblings
+    const sibNodes  = data.siblings.map(s => newPersons.find(p => p.id === s.id)).filter(Boolean) as GraphPerson[];
+    const sibEdges  = (sib: GraphPerson) => newEdges.filter(e => e.id.includes(`sib-${sib.id}`));
+    const sibEdgeIds = new Set(sibNodes.flatMap(s => sibEdges(s).map(e => e.id)));
+
+    // Demi-frères/sœurs
+    const halfIds = new Set([
+      ...data.motherOtherUnions.flatMap(m => [m.partner?.id, ...m.children.map(c => c.id)].filter(Boolean) as string[]),
+      ...data.fatherOtherUnions.flatMap(f => [f.partner?.id, ...f.children.map(c => c.id)].filter(Boolean) as string[]),
+    ]);
+    const halfNodes = newPersons.filter(p => halfIds.has(p.id));
+    const halfUnions = newUnions.filter(u =>
+      data.motherOtherUnions.concat(data.fatherOtherUnions)
+        .some(ou => ou.union && `u-${ou.union.id}` === u.id) ||
+      u.id.startsWith("mou-") || u.id.startsWith("fou-")
+    );
+    const halfUnionIds = new Set(halfUnions.map(u => u.id));
+    const halfEdges = newEdges.filter(e =>
+      !parentEdgeIds.has(e.id) && !sibEdgeIds.has(e.id) &&
+      (halfNodes.some(n => e.id.includes(n.id)) || halfUnions.some(u => e.id.includes(u.id)))
+    );
+    const halfEdgeIds = new Set(halfEdges.map(e => e.id));
+
+    // Propres unions + enfants
+    const ownPartnerIds = new Set(data.ownUnions.filter(o => o.partner).map(o => o.partner!.id));
+    const ownChildIds   = new Set(data.ownUnions.flatMap(o => o.children.map(c => c.id)));
+    const ownNodes  = newPersons.filter(p => ownPartnerIds.has(p.id) || ownChildIds.has(p.id));
+    const ownUnions = newUnions.filter(u =>
+      !halfUnionIds.has(u.id) && u.id !== puid &&
+      data.ownUnions.some(ou => ou.union && `u-${ou.union.id}` === u.id)
+    );
+    const ownEdges = newEdges.filter(e =>
+      !parentEdgeIds.has(e.id) && !sibEdgeIds.has(e.id) && !halfEdgeIds.has(e.id)
+    );
+
+    let t = 0;
+
+    // ① Moi
+    if (selfNode) { send([selfNode], [], [], t); t += STEP; }
+
+    // ② Père (seul)
+    if (fatherNode) { send([fatherNode], [], [], t); t += STEP; }
+
+    // ③ Mère (seule, après le père)
+    if (motherNode) { send([motherNode], [], [], t); t += STEP; }
+
+    // ④ Nœud union parentale + toutes les lignes de connexion (d'un coup : "le lien apparaît")
+    if (parentUnionNode || parentEdges.length) {
+      send([], parentUnionNode ? [parentUnionNode] : [], parentEdges, t);
+      t += STEP;
+    }
+
+    // ⑤ Frères et sœurs (un par un, chacun avec sa ligne)
+    sibNodes.forEach(sib => {
+      send([sib], [], sibEdges(sib), t);
+      t += STEP;
+    });
+
+    // ⑥ Demi-frères/sœurs (en groupe — évite une attente trop longue)
+    if (halfNodes.length || halfUnions.length) {
+      send(halfNodes, halfUnions, halfEdges, t);
+      t += STEP;
+    }
+
+    // ⑦ Propres unions + enfants (en groupe)
+    if (ownNodes.length || ownUnions.length) {
+      send(ownNodes, ownUnions, ownEdges, t);
+    }
+  }, []);
+
+  // Raccourci Ctrl+Z — undo
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        const prev = navHistoryRef.current.pop();
+        if (!prev) return;
+        setNavEntries([...navHistoryRef.current]);
+        setPersons(prev.persons);
+        setUnions(prev.unions);
+        setEdges(prev.edges);
+        personsRef.current = prev.persons;
+        unionsRef.current  = prev.unions;
+        edgesRef.current   = prev.edges;
+        expandedRef.current  = new Set(prev.expanded);
+        personIdsRef.current = new Set(prev.persons.map(p => p.id));
+        unionIdsRef.current  = new Set(prev.unions.map(u => u.id));
+        edgeIdsRef.current   = new Set(prev.edges.map(ed => ed.id));
+        occupiedPosRef.current = prev.persons.map(p => p.pos);
+        personPosRef.current   = new Map(prev.persons.map(p => [p.id, p.pos]));
+        unionPosRef.current    = new Map(prev.unions.map(u => [u.id, u.pos]));
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -640,6 +870,25 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
     expandNode(rootId, [0, 0, 0]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootId, resetKey, expandNode]);
+
+  const restoreToEntry = useCallback((index: number) => {
+    const entry = navHistoryRef.current[index];
+    if (!entry) return;
+    setPersons(entry.persons); setUnions(entry.unions); setEdges(entry.edges);
+    personsRef.current = entry.persons;
+    unionsRef.current  = entry.unions;
+    edgesRef.current   = entry.edges;
+    expandedRef.current  = new Set(entry.expanded);
+    personIdsRef.current = new Set(entry.persons.map(p => p.id));
+    unionIdsRef.current  = new Set(entry.unions.map(u => u.id));
+    edgeIdsRef.current   = new Set(entry.edges.map(ed => ed.id));
+    occupiedPosRef.current = entry.persons.map(p => p.pos);
+    personPosRef.current   = new Map(entry.persons.map(p => [p.id, p.pos]));
+    unionPosRef.current    = new Map(entry.unions.map(u => [u.id, u.pos]));
+    navHistoryRef.current = navHistoryRef.current.slice(0, index);
+    setNavEntries([...navHistoryRef.current]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleClickPerson = useCallback((node: GraphPerson) => {
     onSelectMember(node.member);
@@ -652,23 +901,107 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
   }, [onSelectUnion]);
 
   return (
-    <Canvas
-      camera={{ position: [4, 22, 32], fov: 60 }}
-      style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)" }}
-    >
-      <CameraReset trigger={cameraReset} />
-      <CameraFocusController targetRef={focusTargetRef} />
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+      <Canvas
+        camera={{ position: [4, 22, 32], fov: 60 }}
+        style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)" }}
+      >
+        <CameraReset trigger={cameraReset} />
+        <CameraFocusController targetRef={focusTargetRef} />
 
-      <ambientLight intensity={0.6} />
-      <pointLight position={[15, 15, 15]} intensity={1.2} />
-      <pointLight position={[-15, -10, -10]} intensity={0.4} />
-      <pointLight position={[0, -20, 5]} intensity={0.3} color="#6366f1" />
+        <ambientLight intensity={0.6} />
+        <pointLight position={[15, 15, 15]} intensity={1.2} />
+        <pointLight position={[-15, -10, -10]} intensity={0.4} />
+        <pointLight position={[0, -20, 5]} intensity={0.3} color="#6366f1" />
 
-      <OrbitControls makeDefault enableDamping dampingFactor={0.06} />
+        <OrbitControls makeDefault enableDamping dampingFactor={0.06} autoRotate={autoRotate} autoRotateSpeed={1.2} />
+        <CameraPresetController mode={viewMode} />
 
-      {edges.map(e   => <Edge        key={e.id} edge={e} />)}
-      {unions.map(u  => <UnionSphere key={u.id} node={u} onClick={handleClickUnion} />)}
-      {persons.map(p => <PersonSphere key={p.id} node={p} onClick={handleClickPerson} />)}
-    </Canvas>
+        {edges.map(e   => <Edge        key={e.id} edge={e} />)}
+        {unions.map(u  => <UnionSphere key={u.id} node={u} onClick={handleClickUnion} />)}
+        {persons.map(p => <PersonSphere key={p.id} node={p} onClick={handleClickPerson} />)}
+      </Canvas>
+
+      {/* ── Panneau historique de navigation ──────────────── */}
+      {showHistory && (
+        <aside style={{
+          position: "absolute", top: 0, right: 0, height: "100%", width: "13rem",
+          background: "rgba(15,23,42,0.95)", backdropFilter: "blur(8px)",
+          borderLeft: "1px solid rgba(255,255,255,0.08)",
+          display: "flex", flexDirection: "column", zIndex: 10,
+        }}>
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid rgba(255,255,255,0.08)", flexShrink: 0 }}>
+            <p style={{ fontSize: "10px", fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.05em", margin: 0 }}>
+              Navigation
+            </p>
+            <p style={{ fontSize: "10px", color: "#475569", margin: "2px 0 0" }}>
+              Ctrl+Z ou Revenir ici
+            </p>
+          </div>
+
+          <div style={{ flex: 1, overflowY: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
+            {/* État actuel */}
+            <div style={{
+              padding: "6px 8px", borderRadius: "8px",
+              background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)",
+              display: "flex", alignItems: "center", gap: "6px",
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#818cf8", flexShrink: 0, display: "inline-block" }} />
+              <span style={{ fontSize: "11px", color: "#a5b4fc", fontWeight: 600 }}>État actuel</span>
+            </div>
+
+            {navEntries.length === 0 ? (
+              <p style={{ fontSize: "11px", color: "#334155", textAlign: "center", padding: "16px 8px", margin: 0 }}>
+                Clique sur une sphère pour naviguer
+              </p>
+            ) : (
+              [...navEntries].reverse().map((entry, i) => {
+                const originalIndex = navEntries.length - 1 - i;
+                return (
+                  <div key={entry.id} style={{
+                    padding: "6px 8px", borderRadius: "8px",
+                    background: "rgba(255,255,255,0.05)",
+                    border: "1px solid rgba(255,255,255,0.06)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "6px" }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <p style={{ fontSize: "11px", color: "#e2e8f0", fontWeight: 600, margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {entry.label}
+                        </p>
+                        <p style={{ fontSize: "10px", color: "#475569", margin: "2px 0 0" }}>
+                          {formatRelativeTime(entry.time)}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => restoreToEntry(originalIndex)}
+                        style={{
+                          flexShrink: 0, fontSize: "10px", fontWeight: 600,
+                          background: "rgba(71,85,105,0.8)", color: "#cbd5e1",
+                          border: "none", borderRadius: "5px", padding: "3px 7px",
+                          cursor: "pointer", marginTop: "2px",
+                          transition: "background 0.15s",
+                        }}
+                        onMouseEnter={e => (e.currentTarget.style.background = "#4f46e5")}
+                        onMouseLeave={e => (e.currentTarget.style.background = "rgba(71,85,105,0.8)")}
+                      >
+                        Revenir
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </aside>
+      )}
+    </div>
   );
+}
+
+// ── Helpers ────────────────────────────────────────────────────────
+function formatRelativeTime(time: number): string {
+  const diff = Date.now() - time;
+  if (diff < 60_000) return "À l'instant";
+  if (diff < 3_600_000) return `il y a ${Math.floor(diff / 60_000)} min`;
+  return new Date(time).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
 }
