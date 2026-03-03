@@ -275,9 +275,16 @@ function EditUnionForm({ union, onCancel, onSuccess, onError }: {
   const [state, setState] = useState<UnionState4>(unionToState4(union));
   const [submitting, setSubmitting] = useState(false);
   const isSep = state === "ex-couple" || state === "divorce";
-  const { register, handleSubmit } = useForm({
+  const { register, handleSubmit, setValue } = useForm({
     defaultValues: { date: (isSep ? union.separation_date : union.union_date)?.slice(0, 10) ?? "" },
   });
+
+  const handleStateChange = (v: UnionState4) => {
+    setState(v);
+    if (v === "ex-couple" || v === "divorce") {
+      setValue("date", new Date().toISOString().slice(0, 10));
+    }
+  };
 
   const onSubmit = async (data: { date: string }) => {
     setSubmitting(true);
@@ -296,7 +303,7 @@ function EditUnionForm({ union, onCancel, onSuccess, onError }: {
       <p className="font-bold text-slate-900 text-sm">
         Modifier : {fullName(union.member1)} × {fullName(union.member2)}
       </p>
-      <UnionStateSelector value={state} onChange={setState} />
+      <UnionStateSelector value={state} onChange={handleStateChange} />
       <div>
         <label className="block text-xs font-semibold text-slate-500 mb-1 uppercase tracking-wide">
           {isSep ? "Date de séparation" : "Date de début"} (optionnel)
@@ -410,12 +417,19 @@ function UnionForm({ members, onSuccess, onError }: {
 }) {
   const [state, setState] = useState<UnionState4 | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { register, handleSubmit, reset, watch } = useForm({
+  const { register, handleSubmit, reset, watch, setValue } = useForm({
     defaultValues: { member1_id: "", member2_id: "", date: "" },
   });
   const m1 = watch("member1_id");
   const m2 = watch("member2_id");
   const isSep = state === "ex-couple" || state === "divorce";
+
+  const handleStateChange = (v: UnionState4) => {
+    setState(v);
+    if ((v === "ex-couple" || v === "divorce") && !watch("date")) {
+      setValue("date", new Date().toISOString().slice(0, 10));
+    }
+  };
 
   const onSubmit = async (data: { member1_id: string; member2_id: string; date: string }) => {
     if (!data.member1_id || !data.member2_id) { onError("Sélectionnez 2 membres."); return; }
@@ -463,7 +477,7 @@ function UnionForm({ members, onSuccess, onError }: {
       {/* État de l'union */}
       <div>
         <p className="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">État de l&apos;union</p>
-        <UnionStateSelector value={state} onChange={setState} />
+        <UnionStateSelector value={state} onChange={handleStateChange} />
       </div>
 
       {/* Date */}

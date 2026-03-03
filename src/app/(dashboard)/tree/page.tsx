@@ -160,28 +160,31 @@ export default function TreePage() {
 
           {/* Reset arbre */}
           <button
-            title="Réinitialiser l'arbre (effacer toutes les branches ouvertes)"
+            title="Ferme les branches ouvertes et revient à la vue initiale de la personne sélectionnée"
             onClick={() => { setResetKey(k => k + 1); setPanel(null); }}
-            className="text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-sm transition-colors"
+            className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
-            🔄
+            <span className="text-sm">🔄</span>
+            <span className="text-[10px] leading-none">Réinitialiser</span>
           </button>
 
           {/* Export JSON */}
           <button
-            title="Exporter l'arbre en JSON"
+            title="Télécharger l'arbre complet au format JSON"
             onClick={handleExport}
-            className="text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-sm transition-colors"
+            className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
-            📤
+            <span className="text-sm">📤</span>
+            <span className="text-[10px] leading-none">Exporter</span>
           </button>
 
           {/* Import JSON */}
           <label
             title="Importer un arbre depuis un fichier JSON"
-            className="cursor-pointer text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 text-sm transition-colors"
+            className="cursor-pointer flex flex-col items-center gap-0.5 text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
-            📥
+            <span className="text-sm">📥</span>
+            <span className="text-[10px] leading-none">Importer</span>
             <input
               ref={importRef}
               type="file"
@@ -569,9 +572,16 @@ function EditUnionForm({ union, onCancel, onSuccess }: { union: Spouse; onCancel
   const [saveError, setSaveError] = useState<string | null>(null);
   const isSep = state === "ex-couple" || state === "divorce";
 
-  const { register, handleSubmit, formState: { isSubmitting } } = useForm({
+  const { register, handleSubmit, formState: { isSubmitting }, setValue } = useForm({
     defaultValues: { date: (isSep ? union.separation_date : union.union_date)?.slice(0, 10) ?? "" },
   });
+
+  const handleStateChange = (v: UnionState4) => {
+    setState(v);
+    if (v === "ex-couple" || v === "divorce") {
+      setValue("date", new Date().toISOString().slice(0, 10));
+    }
+  };
 
   const onSubmit = async (data: { date: string }) => {
     setSaveError(null);
@@ -593,7 +603,7 @@ function EditUnionForm({ union, onCancel, onSuccess }: { union: Spouse; onCancel
 
       <div className="grid grid-cols-2 gap-2">
         {UNION_STATE_OPTIONS.map(opt => (
-          <button key={opt.value} type="button" onClick={() => setState(opt.value)}
+          <button key={opt.value} type="button" onClick={() => handleStateChange(opt.value)}
             className={`flex flex-col items-center py-2.5 rounded-xl border transition-all text-xs font-semibold ${
               state === opt.value ? opt.active : "bg-white/5 border-white/10 text-slate-400 hover:bg-white/10"
             }`}>

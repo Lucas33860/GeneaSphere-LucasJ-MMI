@@ -12,7 +12,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <span className="font-bold text-white tracking-tight hidden sm:block">GeneaSphere</span>
           </Link>
           <NavLinks />
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center">
             <LogoutButton />
           </div>
         </div>

@@ -19,12 +19,20 @@ export async function GET() {
   // Toutes les unions impliquant au moins un de ses membres
   let spouses: unknown[] = [];
   if (memberIds.length > 0) {
-    const { data, error: sErr } = await supabase
-      .from("spouses")
-      .select("*")
-      .or(`member1_id.in.(${memberIds.join(",")}),member2_id.in.(${memberIds.join(",")})`);
-    if (sErr) return NextResponse.json({ error: sErr.message }, { status: 500 });
-    spouses = data ?? [];
+    const [res1, res2] = await Promise.all([
+      supabase.from("spouses").select("*").in("member1_id", memberIds),
+      supabase.from("spouses").select("*").in("member2_id", memberIds),
+    ]);
+    if (res1.error) return NextResponse.json({ error: res1.error.message }, { status: 500 });
+    if (res2.error) return NextResponse.json({ error: res2.error.message }, { status: 500 });
+
+    // Fusionner et dédoublonner par id
+    const seen = new Set<string>();
+    spouses = [...(res1.data ?? []), ...(res2.data ?? [])].filter(s => {
+      if (seen.has(s.id)) return false;
+      seen.add(s.id);
+      return true;
+    });
   }
 
   return NextResponse.json({

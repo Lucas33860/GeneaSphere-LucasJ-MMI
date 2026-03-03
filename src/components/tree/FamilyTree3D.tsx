@@ -465,7 +465,7 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
         const hDist = Math.ceil((hci + 1) / 2);
         const halfChildDesired: [number, number, number] = [
           actualOtherUnionPos[0],
-          actualOtherUnionPos[1] - PARENT_Y,
+          selfPos[1],
           actualOtherUnionPos[2] + hSide * hDist * 8,
         ];
         const actualHalfChild = addPerson(halfChild, halfChildDesired);
@@ -549,7 +549,7 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
         const hDist = Math.ceil((hci + 1) / 2);
         const halfChildDesired: [number, number, number] = [
           actualOtherUnionPos[0],
-          actualOtherUnionPos[1] - PARENT_Y,
+          selfPos[1],
           actualOtherUnionPos[2] + hSide * hDist * 8,
         ];
         const actualHalfChild = addPerson(halfChild, halfChildDesired);
@@ -638,7 +638,8 @@ export function FamilyTree3D({ rootId, resetKey, onSelectMember, onSelectUnion }
   useEffect(() => {
     if (!rootId) return;
     expandNode(rootId, [0, 0, 0]);
-  }, [rootId, expandNode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rootId, resetKey, expandNode]);
 
   const handleClickPerson = useCallback((node: GraphPerson) => {
     onSelectMember(node.member);

@@ -9,10 +9,13 @@ export const UNION_STATE_OPTIONS: { value: UnionState4; picto: string; label: st
 
 export function stateToBody(state: UnionState4, date: string) {
   const isSep = state === "ex-couple" || state === "divorce";
+  // Pour un état séparé sans date saisie : on stocke aujourd'hui
+  // (un separation_date NULL serait indiscernable de "marié" côté DB)
+  const fallbackDate = new Date().toISOString().slice(0, 10);
   return {
     union_type:      state === "couple" || state === "ex-couple" ? "couple" : "marriage",
     union_date:      !isSep ? (date || null) : null,
-    separation_date:  isSep ? (date || null) : null,
+    separation_date:  isSep ? (date || fallbackDate) : null,
   };
 }
 
