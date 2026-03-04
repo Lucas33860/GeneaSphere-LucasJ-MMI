@@ -1,14 +1,25 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
+  const { searchParams } = new URL(request.url);
+  const treeId = searchParams.get("treeId");
+
+  let membersQuery = supabase
+    .from("members")
+    .select("id, first_name, last_name, birth_date, death_date, gender");
+  if (treeId) membersQuery = membersQuery.eq("tree_id", treeId);
+
+  let unionsQuery = supabase.from("spouses").select("union_type, separation_date");
+  if (treeId) unionsQuery = unionsQuery.eq("tree_id", treeId);
+
   const [{ data: members, error }, { data: unions }] = await Promise.all([
-    supabase.from("members").select("id, first_name, last_name, birth_date, death_date, gender"),
-    supabase.from("spouses").select("union_type, separation_date"),
+    membersQuery,
+    unionsQuery,
   ]);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

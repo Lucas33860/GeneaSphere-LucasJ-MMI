@@ -5,6 +5,7 @@ import type { Member } from "@/types";
 
 const mockMember: Member = {
   id: "123e4567-e89b-12d3-a456-426614174000",
+  tree_id: "tree-uuid",
   first_name: "Jean",
   last_name: "Dupont",
   gender: "male",

@@ -24,6 +24,7 @@ interface GraphEdge {
   id: string;
   from: [number, number, number];
   to: [number, number, number];
+  unId?: string; // graph union node ID this edge belongs to
 }
 export interface NavEntry {
   id: string;
@@ -80,7 +81,7 @@ function unionColor(u: Spouse) {
 }
 
 // ── Anti-collision ────────────────────────────────────────────────
-const MIN_DIST    = 7;
+const MIN_DIST    = 12;
 const MIN_DIST_SQ = MIN_DIST * MIN_DIST;
 
 function findFreePos(
@@ -171,7 +172,7 @@ function PersonSphere({ node, onClick }: {
 }
 
 // ── UnionSphere ───────────────────────────────────────────────────
-function UnionSphere({ node, onClick }: { node: GraphUnion; onClick?: (u: Spouse) => void }) {
+function UnionSphere({ node, onClick, selected }: { node: GraphUnion; onClick?: (u: Spouse, nodeId: string) => void; selected: boolean }) {
   const [hovered, setHovered] = useState(false);
   const meshRef = useRef<THREE.Mesh>(null);
   const color = node.union ? unionColor(node.union) : "#9ca3af";
@@ -191,13 +192,19 @@ function UnionSphere({ node, onClick }: { node: GraphUnion; onClick?: (u: Spouse
     <group position={node.pos}>
       <mesh
         ref={meshRef}
-        onClick={clickable ? (e => { e.stopPropagation(); onClick?.(node.union!); }) : undefined}
+        onClick={clickable ? (e => { e.stopPropagation(); onClick?.(node.union!, node.id); }) : undefined}
         onPointerOver={clickable ? (e => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }) : undefined}
         onPointerOut={clickable ? (() => { setHovered(false); document.body.style.cursor = "default"; }) : undefined}
       >
         <sphereGeometry args={[0.4, 24, 24]} />
-        <meshStandardMaterial color={color} roughness={0.3} metalness={0.2} emissive={hovered ? color : "#000000"} emissiveIntensity={hovered ? 0.4 : 0} />
+        <meshStandardMaterial color={color} roughness={0.3} metalness={0.2} emissive={selected ? "#ffffff" : hovered ? color : "#000000"} emissiveIntensity={selected ? 0.6 : hovered ? 0.4 : 0} />
       </mesh>
+      {selected && (
+        <mesh>
+          <sphereGeometry args={[0.72, 24, 24]} />
+          <meshStandardMaterial color="#a78bfa" transparent opacity={0.35} depthWrite={false} />
+        </mesh>
+      )}
       <Billboard>
         <Text position={[0, 0.8, 0]} fontSize={0.5} anchorX="center" renderOrder={1}>
           {picto}
@@ -208,8 +215,8 @@ function UnionSphere({ node, onClick }: { node: GraphUnion; onClick?: (u: Spouse
 }
 
 // ── Edge ──────────────────────────────────────────────────────────
-function Edge({ edge }: { edge: GraphEdge }) {
-  return <Line points={[edge.from, edge.to]} color="#475569" lineWidth={1.5} />;
+function Edge({ edge, highlighted }: { edge: GraphEdge; highlighted: boolean }) {
+  return <Line points={[edge.from, edge.to]} color={highlighted ? "#a78bfa" : "#475569"} lineWidth={highlighted ? 3.5 : 1.5} />;
 }
 
 
@@ -296,17 +303,19 @@ interface FamilyTree3DProps {
   resetKey?: number;
   viewMode?: ViewMode;
   showHistory?: boolean;
+  treeId?: string;
   onSelectMember: (m: Member) => void;
   onSelectUnion?: (u: Spouse) => void;
 }
 
 // ── Composant principal ───────────────────────────────────────────
-export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory = false, onSelectMember, onSelectUnion }: FamilyTree3DProps) {
+export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory = false, treeId, onSelectMember, onSelectUnion }: FamilyTree3DProps) {
   const [persons, setPersons] = useState<GraphPerson[]>([]);
   const [unions,  setUnions]  = useState<GraphUnion[]>([]);
   const [edges,   setEdges]   = useState<GraphEdge[]>([]);
-  const [cameraReset, setCameraReset] = useState(0);
-  const [autoRotate, setAutoRotate]   = useState(true);
+  const [cameraReset, setCameraReset]       = useState(0);
+  const [autoRotate, setAutoRotate]         = useState(true);
+  const [selectedUnionId, setSelectedUnionId] = useState<string | null>(null);
 
   const expandedRef    = useRef<Set<string>>(new Set());
   const personIdsRef   = useRef<Set<string>>(new Set());
@@ -359,7 +368,7 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
     if (expandedRef.current.has(personId)) return;
     expandedRef.current.add(personId);
 
-    const res = await fetch(`/api/tree?person_id=${personId}`);
+    const res = await fetch(`/api/tree?person_id=${personId}${treeId ? `&treeId=${treeId}` : ""}`);
     if (!res.ok) return;
     const data: TreeData = await res.json();
 
@@ -407,10 +416,10 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
       return desiredPos;
     };
 
-    const addEdge = (id: string, from: [number, number, number], to: [number, number, number]) => {
+    const addEdge = (id: string, from: [number, number, number], to: [number, number, number], unId?: string) => {
       if (edgeIdsRef.current.has(id)) return;
       edgeIdsRef.current.add(id);
-      newEdges.push({ id, from, to });
+      newEdges.push({ id, from, to, unId });
     };
 
     // ── Position réelle de la personne courante ───────────────────
@@ -428,10 +437,10 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
     })();
 
     // ── Constantes de placement ───────────────────────────────────
-    const PARENT_Y = 9;
-    const PARENT_X = 7;
-    const UNION_Y  = 4.5;
-    const RADIUS   = 13;
+    const PARENT_Y = 16;
+    const PARENT_X = 12;
+    const UNION_Y  = 8;
+    const RADIUS   = 22;
 
     const confTest = (p: [number, number, number]) =>
       occupiedPosRef.current.some(
@@ -468,9 +477,9 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
         (actualFather[2] + actualMother[2]) / 2,
       ];
       actualParentUnionPos = addUnion(puid, data.parentUnion, unionPos);
-      addEdge(`e-f-${data.father!.id}-pu-${personId}`, actualFather, actualParentUnionPos);
-      addEdge(`e-m-${data.mother!.id}-pu-${personId}`, actualMother, actualParentUnionPos);
-      addEdge(`e-pu-${puid}-${personId}`, actualParentUnionPos, selfPos);
+      addEdge(`e-f-${data.father!.id}-pu-${personId}`, actualFather, actualParentUnionPos, puid);
+      addEdge(`e-m-${data.mother!.id}-pu-${personId}`, actualMother, actualParentUnionPos, puid);
+      addEdge(`e-pu-${puid}-${personId}`, actualParentUnionPos, selfPos, puid);
     } else if (actualFather) {
       addEdge(`e-single-f-${personId}`, actualFather, selfPos);
     } else if (actualMother) {
@@ -488,7 +497,7 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
       ];
       const actualSib = addPerson(sib, desired);
       const fromPos = actualParentUnionPos ?? selfPos;
-      addEdge(`e-sib-${sib.id}-from-${personId}`, fromPos, actualSib);
+      addEdge(`e-sib-${sib.id}-from-${personId}`, fromPos, actualSib, actualParentUnionPos ? puid : undefined);
     });
 
     // ── Demi-frères/sœurs via motherOtherUnions ───────────────────
@@ -562,8 +571,8 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
         (motherPos[2] + actualOtherPartner[2]) / 2,
       ];
       const actualOtherUnionPos = addUnion(otherUnionId, mou.union, otherUnionMid);
-      if (actualMother) addEdge(`e-${otherUnionId}-mother`, actualMother, actualOtherUnionPos);
-      addEdge(`e-${otherUnionId}-partner`, actualOtherUnionPos, actualOtherPartner);
+      if (actualMother) addEdge(`e-${otherUnionId}-mother`, actualMother, actualOtherUnionPos, otherUnionId);
+      addEdge(`e-${otherUnionId}-partner`, actualOtherUnionPos, actualOtherPartner, otherUnionId);
 
       halfChildren.forEach((halfChild, hci) => {
         knownChildIds.add(halfChild.id);
@@ -575,7 +584,7 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
           actualOtherUnionPos[2] + hSide * hDist * 8,
         ];
         const actualHalfChild = addPerson(halfChild, halfChildDesired);
-        addEdge(`e-halfchild-${halfChild.id}-union-${mou.union!.id}`, actualOtherUnionPos, actualHalfChild);
+        addEdge(`e-halfchild-${halfChild.id}-union-${mou.union!.id}`, actualOtherUnionPos, actualHalfChild, otherUnionId);
       });
     });
 
@@ -646,8 +655,8 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
         (fPos[2] + actualOtherPartner[2]) / 2,
       ];
       const actualOtherUnionPos = addUnion(otherUnionId, fou.union, otherUnionMid);
-      if (actualFather) addEdge(`e-${otherUnionId}-father`, actualFather, actualOtherUnionPos);
-      addEdge(`e-${otherUnionId}-fpartner`, actualOtherUnionPos, actualOtherPartner);
+      if (actualFather) addEdge(`e-${otherUnionId}-father`, actualFather, actualOtherUnionPos, otherUnionId);
+      addEdge(`e-${otherUnionId}-fpartner`, actualOtherUnionPos, actualOtherPartner, otherUnionId);
 
       fatherHalfChildren.forEach((halfChild, hci) => {
         knownChildIds.add(halfChild.id);
@@ -659,7 +668,7 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
           actualOtherUnionPos[2] + hSide * hDist * 8,
         ];
         const actualHalfChild = addPerson(halfChild, halfChildDesired);
-        addEdge(`e-halfchild-f-${halfChild.id}-u-${fou.union!.id}`, actualOtherUnionPos, actualHalfChild);
+        addEdge(`e-halfchild-f-${halfChild.id}-u-${fou.union!.id}`, actualOtherUnionPos, actualHalfChild, otherUnionId);
       });
     });
 
@@ -719,8 +728,8 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
         (selfPos[2] + actualPartner[2]) / 2,
       ];
       const actualUnionPos = addUnion(unionId, ou.union, unionPos);
-      addEdge(`e-${unionId}-self`,    selfPos,       actualUnionPos);
-      addEdge(`e-${unionId}-partner`, actualPartner, actualUnionPos);
+      addEdge(`e-${unionId}-self`,    selfPos,       actualUnionPos, unionId);
+      addEdge(`e-${unionId}-partner`, actualPartner, actualUnionPos, unionId);
 
       // Enfants de cette union, une génération plus bas
       (ou.children ?? []).forEach((child, k) => {
@@ -732,7 +741,7 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
           actualUnionPos[2] + kSide * kDist * 8,
         ];
         const actualChild = addPerson(child, childDesired);
-        addEdge(`e-child-${child.id}-${unionId}`, actualUnionPos, actualChild);
+        addEdge(`e-child-${child.id}-${unionId}`, actualUnionPos, actualChild, unionId);
       });
     });
 
@@ -748,7 +757,10 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
       setTimeout(() => {
         if (ps.length) setPersons(prev => [...prev, ...ps.map(p => ({ ...p, birthTime: bt }))]);
         if (us.length) setUnions(prev  => [...prev, ...us.map(u => ({ ...u, birthTime: bt }))]);
-        if (es.length) setEdges(prev   => [...prev, ...es]);
+        if (es.length) setEdges(prev => {
+          const seen = new Set(prev.map(e => e.id));
+          return [...prev, ...es.filter(e => !seen.has(e.id))];
+        });
       }, delayMs);
     };
 
@@ -891,20 +903,23 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
   }, []);
 
   const handleClickPerson = useCallback((node: GraphPerson) => {
+    setSelectedUnionId(null);
     onSelectMember(node.member);
     focusTargetRef.current = new THREE.Vector3(...node.pos);
     expandNode(node.id, node.pos);
   }, [onSelectMember, expandNode]);
 
-  const handleClickUnion = useCallback((union: Spouse) => {
+  const handleClickUnion = useCallback((union: Spouse, graphNodeId: string) => {
+    setSelectedUnionId(graphNodeId);
     onSelectUnion?.(union);
   }, [onSelectUnion]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <Canvas
-        camera={{ position: [4, 22, 32], fov: 60 }}
+        camera={{ position: [4, 35, 55], fov: 60 }}
         style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)" }}
+        onClick={() => setSelectedUnionId(null)}
       >
         <CameraReset trigger={cameraReset} />
         <CameraFocusController targetRef={focusTargetRef} />
@@ -917,8 +932,8 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
         <OrbitControls makeDefault enableDamping dampingFactor={0.06} autoRotate={autoRotate} autoRotateSpeed={1.2} />
         <CameraPresetController mode={viewMode} />
 
-        {edges.map(e   => <Edge        key={e.id} edge={e} />)}
-        {unions.map(u  => <UnionSphere key={u.id} node={u} onClick={handleClickUnion} />)}
+        {edges.map(e   => <Edge        key={e.id} edge={e} highlighted={!!selectedUnionId && e.unId === selectedUnionId} />)}
+        {unions.map(u  => <UnionSphere key={u.id} node={u} onClick={handleClickUnion} selected={selectedUnionId === u.id} />)}
         {persons.map(p => <PersonSphere key={p.id} node={p} onClick={handleClickPerson} />)}
       </Canvas>
 

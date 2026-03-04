@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 
 const navLinks = [
   { href: "/tree",      label: "Arbre 3D",    icon: "🌳" },
@@ -11,12 +11,16 @@ const navLinks = [
 
 export function NavLinks() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const treeId = searchParams.get("treeId");
+
   return (
     <div className="flex gap-1">
       {navLinks.map(({ href, label, icon }) => {
         const active = pathname.startsWith(href);
+        const fullHref = treeId ? `${href}?treeId=${treeId}` : href;
         return (
-          <Link key={href} href={href}
+          <Link key={href} href={fullHref}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
               active
                 ? "bg-indigo-600 text-white shadow-sm"

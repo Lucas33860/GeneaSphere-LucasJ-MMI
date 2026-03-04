@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 interface Stats {
   total_members: number;
@@ -23,12 +24,32 @@ interface Stats {
 }
 
 export default function StatsPage() {
+  const searchParams = useSearchParams();
+  const treeId = searchParams.get("treeId");
+
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError]  = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/stats").then(r => r.json()).then(setStats).catch(() => setError("Impossible de charger"));
-  }, []);
+    if (!treeId) return;
+    const url = `/api/stats?treeId=${treeId}`;
+    fetch(url).then(r => r.json()).then(setStats).catch(() => setError("Impossible de charger"));
+  }, [treeId]);
+
+  if (!treeId) {
+    return (
+      <main className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-6 text-center px-4">
+        <div className="text-6xl">📊</div>
+        <div>
+          <p className="text-xl font-semibold text-slate-800 mb-2">Aucun arbre sélectionné</p>
+          <p className="text-slate-400 text-sm">Choisissez un arbre depuis votre tableau de bord pour voir ses statistiques.</p>
+        </div>
+        <a href="/dashboard" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-xl transition-colors">
+          Aller au dashboard
+        </a>
+      </main>
+    );
+  }
 
   if (error) return (
     <main className="min-h-screen bg-slate-50 flex items-center justify-center">

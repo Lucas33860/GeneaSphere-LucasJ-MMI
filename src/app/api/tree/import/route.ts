@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getUserTreeRole, canWrite } from "@/lib/tree-access";
 
 interface ImportedMember {
   id: string;
@@ -27,6 +28,7 @@ interface ImportedSpouse {
 interface ImportPayload {
   members: ImportedMember[];
   spouses: ImportedSpouse[];
+  treeId?: string;
 }
 
 export async function POST(request: Request) {
@@ -41,14 +43,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "JSON invalide" }, { status: 400 });
   }
 
-  const { members: importedMembers = [], spouses: importedSpouses = [] } = payload;
+  const { members: importedMembers = [], spouses: importedSpouses = [], treeId } = payload;
 
   if (!Array.isArray(importedMembers) || !Array.isArray(importedSpouses)) {
     return NextResponse.json({ error: "Format invalide (members et spouses doivent être des tableaux)" }, { status: 400 });
   }
 
+  if (treeId) {
+    const role = await getUserTreeRole(supabase, treeId, user.id);
+    if (!canWrite(role)) return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+
   // Phase 1 — Créer tous les membres SANS les références père/mère
-  // (pour éviter les erreurs de clé étrangère si le père n'est pas encore créé)
   const idMap = new Map<string, string>(); // oldId → newId
 
   for (const m of importedMembers) {
@@ -65,7 +71,7 @@ export async function POST(request: Request) {
         is_private:  m.is_private  ?? false,
         photo_url:   m.photo_url   ?? null,
         created_by:  user.id,
-        // father_id et mother_id ajoutés en phase 2
+        ...(treeId ? { tree_id: treeId } : {}),
       })
       .select("id")
       .single();
@@ -106,6 +112,7 @@ export async function POST(request: Request) {
       union_type:      sp.union_type      ?? "couple",
       union_date:      sp.union_date      ?? null,
       separation_date: sp.separation_date ?? null,
+      ...(treeId ? { tree_id: treeId } : {}),
     });
     if (!error) spousesCreated++;
   }

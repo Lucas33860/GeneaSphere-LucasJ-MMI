@@ -1,16 +1,24 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { memberSchema } from "@/lib/schemas/member";
+import { getUserTreeRole, canWrite } from "@/lib/tree-access";
 
 export { memberSchema };
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("members")
-    .select("*")
-    .order("last_name");
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
+  const { searchParams } = new URL(request.url);
+  const treeId = searchParams.get("treeId");
+
+  let query = supabase.from("members").select("*").order("last_name");
+  if (treeId) {
+    query = query.eq("tree_id", treeId);
+  }
+
+  const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data);
 }
@@ -21,14 +29,21 @@ export async function POST(request: Request) {
   if (!user) return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
 
   const body = await request.json();
-  const parsed = memberSchema.safeParse(body);
+  const { treeId, ...rest } = body;
+
+  if (treeId) {
+    const role = await getUserTreeRole(supabase, treeId, user.id);
+    if (!canWrite(role)) return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  }
+
+  const parsed = memberSchema.safeParse(rest);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
   const { data, error } = await supabase
     .from("members")
-    .insert({ ...parsed.data, created_by: user.id })
+    .insert({ ...parsed.data, created_by: user.id, ...(treeId ? { tree_id: treeId } : {}) })
     .select()
     .single();
 

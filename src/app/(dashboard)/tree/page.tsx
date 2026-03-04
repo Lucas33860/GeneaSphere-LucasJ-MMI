@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FamilyTree3D, type ViewMode } from "@/components/tree/FamilyTree3D";
-import type { Member, Spouse } from "@/types";
+import type { Member, Spouse, Tree, TreeAccessEntry } from "@/types";
+import type { TreeRole } from "@/lib/tree-access";
 import { darkInputCls } from "@/lib/ui";
 import { uploadMemberPhoto } from "@/lib/supabase/storage";
 import { type UnionState4, UNION_STATE_OPTIONS, stateToBody, unionToState4 } from "@/lib/union";
@@ -22,8 +24,206 @@ const editMemberSchema = z.object({
 });
 type EditMemberInput = z.infer<typeof editMemberSchema>;
 
+// ── Rôle badges ───────────────────────────────────────────────────
+const ROLE_LABELS: Record<string, string> = {
+  owner:  "Propriétaire",
+  admin:  "Admin",
+  editor: "Éditeur",
+  reader: "Lecteur",
+};
+const ROLE_COLORS: Record<string, string> = {
+  owner:  "bg-violet-600/20 text-violet-300 border-violet-500/30",
+  admin:  "bg-blue-600/20 text-blue-300 border-blue-500/30",
+  editor: "bg-emerald-600/20 text-emerald-300 border-emerald-500/30",
+  reader: "bg-slate-600/20 text-slate-400 border-slate-500/30",
+};
+
+// ── canWrite / canDelete helpers (frontend) ───────────────────────
+const canWrite  = (r: TreeRole | null) => r === "owner" || r === "admin" || r === "editor";
+const canDelete = (r: TreeRole | null) => r === "owner" || r === "admin";
+const canShare  = (r: TreeRole | null) => r === "owner" || r === "admin";
+
+// ── ShareModal ────────────────────────────────────────────────────
+interface UserResult { id: string; full_name: string | null; email: string; }
+
+function ShareModal({ treeId, onClose }: { treeId: string; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<UserResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [accesses, setAccesses] = useState<TreeAccessEntry[]>([]);
+  const [treeOwner, setTreeOwner] = useState<{ id: string; name: string } | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  const loadAccesses = useCallback(async () => {
+    const [aRes, tRes] = await Promise.all([
+      fetch(`/api/trees/${treeId}/access`),
+      fetch(`/api/trees/${treeId}`),
+    ]);
+    if (aRes.ok) setAccesses(await aRes.json());
+    if (tRes.ok) {
+      const tree = await tRes.json();
+      setTreeOwner({ id: tree.owner_id, name: tree.owner_name ?? "Propriétaire" });
+    }
+  }, [treeId]);
+
+  useEffect(() => { loadAccesses(); }, [loadAccesses]);
+
+  useEffect(() => {
+    if (query.length < 2) { setResults([]); return; }
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      const res = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`);
+      if (res.ok) setResults(await res.json());
+      setSearching(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const grantAccess = async (userId: string, role: string) => {
+    const res = await fetch(`/api/trees/${treeId}/access`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId, role }),
+    });
+    if (res.ok) {
+      setFeedback("Accès accordé !");
+      setQuery("");
+      setResults([]);
+      await loadAccesses();
+    } else {
+      const d = await res.json();
+      setFeedback(d.error ?? "Erreur");
+    }
+    setTimeout(() => setFeedback(null), 3000);
+  };
+
+  const changeRole = async (userId: string, role: string) => {
+    await fetch(`/api/trees/${treeId}/access/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role }),
+    });
+    await loadAccesses();
+  };
+
+  const revokeAccess = async (userId: string) => {
+    await fetch(`/api/trees/${treeId}/access/${userId}`, { method: "DELETE" });
+    await loadAccesses();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-slate-900 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 shrink-0">
+          <p className="font-bold text-white">Partager l&apos;arbre</p>
+          <button onClick={onClose} className="text-slate-400 hover:text-white">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          {feedback && (
+            <p className="text-xs text-emerald-300 bg-emerald-900/30 border border-emerald-500/20 px-3 py-2 rounded-lg">{feedback}</p>
+          )}
+
+          {/* Recherche */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Inviter un utilisateur</label>
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Nom ou email…"
+              className="w-full bg-white/5 border border-white/10 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-500"
+            />
+            {searching && <p className="text-xs text-slate-500 mt-1">Recherche…</p>}
+            {results.length > 0 && (
+              <div className="mt-2 space-y-2">
+                {results.map(u => (
+                  <div key={u.id} className="flex items-center gap-3 bg-white/5 rounded-xl px-3 py-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-white font-medium truncate">{u.full_name ?? u.email}</p>
+                      <p className="text-xs text-slate-400 truncate">{u.email}</p>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      {(["reader", "editor", "admin"] as const).map(r => (
+                        <button
+                          key={r}
+                          onClick={() => grantAccess(u.id, r)}
+                          className="text-xs px-2 py-1 rounded-lg bg-indigo-600/30 hover:bg-indigo-600 text-indigo-300 hover:text-white transition-colors"
+                        >
+                          {ROLE_LABELS[r]}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Accès existants */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">Accès existants</label>
+            <div className="space-y-2">
+              {/* Propriétaire */}
+              {treeOwner && (
+                <div className="flex items-center gap-3 bg-white/5 rounded-xl px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white font-medium truncate">{treeOwner.name}</p>
+                  </div>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-violet-600/20 text-violet-300 border border-violet-500/30">
+                    Propriétaire
+                  </span>
+                </div>
+              )}
+
+              {accesses.map(a => (
+                <div key={a.id} className="flex items-center gap-3 bg-white/5 rounded-xl px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-white font-medium truncate">{a.user_name ?? a.user_email ?? a.user_id}</p>
+                    {a.user_email && <p className="text-xs text-slate-400 truncate">{a.user_email}</p>}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <select
+                      value={a.role}
+                      onChange={e => changeRole(a.user_id, e.target.value)}
+                      className="text-xs bg-white/10 border border-white/10 text-slate-200 rounded-lg px-2 py-1 focus:outline-none"
+                    >
+                      <option value="reader">Lecteur</option>
+                      <option value="editor">Éditeur</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                    <button
+                      onClick={() => revokeAccess(a.user_id)}
+                      className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded-lg hover:bg-red-900/20"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {accesses.length === 0 && !treeOwner && (
+                <p className="text-xs text-slate-500 text-center py-3">Aucun accès partagé</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page principale ───────────────────────────────────────────────
 export default function TreePage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const [trees, setTrees] = useState<Tree[]>([]);
+  const [activeTreeId, setActiveTreeId] = useState<string | null>(null);
+  const [treeRole, setTreeRole] = useState<TreeRole | null>(null);
   const [members, setMembers]       = useState<Member[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [memberError, setMemberError] = useState<string | null>(null);
@@ -32,6 +232,7 @@ export default function TreePage() {
   const [viewMode, setViewMode]           = useState<ViewMode>("free");
   const [showNavHistory, setShowNavHistory] = useState(false);
   const [importStatus, setImportStatus] = useState<{ type: "ok" | "err" | "loading"; msg: string } | null>(null);
+  const [showShare, setShowShare] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
   const [panel, setPanel] = useState<
@@ -40,30 +241,60 @@ export default function TreePage() {
     null
   >(null);
 
+  // ── Charger la liste des arbres ───────────────────────────────
   useEffect(() => {
-    fetch("/api/members")
+    fetch("/api/trees")
+      .then(r => r.json())
+      .then(data => {
+        const all: Tree[] = [...(data.owned ?? []), ...(data.shared ?? [])];
+        setTrees(all);
+
+        const urlTreeId = searchParams.get("treeId");
+        // Ne sélectionne un arbre que si treeId est dans l'URL
+        const initial = urlTreeId && all.find(t => t.id === urlTreeId) ? urlTreeId : null;
+        setActiveTreeId(initial);
+      })
+      .catch(() => {});
+  }, [searchParams]);
+
+  // ── Charger les membres + rôle quand l'arbre change ──────────
+  useEffect(() => {
+    if (!activeTreeId) return;
+
+    const tree = trees.find(t => t.id === activeTreeId);
+    setTreeRole((tree?.role as TreeRole) ?? null);
+
+    const url = `/api/members?treeId=${activeTreeId}`;
+    fetch(url)
       .then(r => r.json())
       .then((data: Member[]) => {
         setMembers(data);
         if (data.length > 0) setSelectedId(data[0].id);
+        else setSelectedId("");
       })
       .catch(() => setMemberError("Impossible de charger les membres"));
-  }, []);
+  }, [activeTreeId, trees]);
+
+  const handleTreeChange = (treeId: string) => {
+    setActiveTreeId(treeId);
+    setPanel(null);
+    router.replace(`/tree?treeId=${treeId}`);
+  };
 
   const handleSelectMember = (m: Member) => setPanel({ type: "member", data: m, editing: false });
   const handleSelectUnion  = (u: Spouse) => setPanel({ type: "union",  data: u, editing: false });
 
   const handleExport = async () => {
-    const res = await fetch("/api/tree/export");
+    const url = activeTreeId ? `/api/tree/export?treeId=${activeTreeId}` : "/api/tree/export";
+    const res = await fetch(url);
     if (!res.ok) return;
     const json = await res.json();
     const blob = new Blob([JSON.stringify(json, null, 2)], { type: "application/json" });
-    const url  = URL.createObjectURL(blob);
     const a    = document.createElement("a");
-    a.href     = url;
+    a.href     = URL.createObjectURL(blob);
     a.download = `geneasphere-export-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(a.href);
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -73,6 +304,7 @@ export default function TreePage() {
     try {
       const text = await file.text();
       const payload = JSON.parse(text);
+      if (activeTreeId) payload.treeId = activeTreeId;
       const res = await fetch("/api/tree/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -83,8 +315,8 @@ export default function TreePage() {
         setImportStatus({ type: "err", msg: data.error ?? "Erreur lors de l'import" });
       } else {
         setImportStatus({ type: "ok", msg: `${data.members_created} membres + ${data.spouses_created} unions importés.` });
-        // Recharger la liste des membres
-        const memRes = await fetch("/api/members");
+        const url = activeTreeId ? `/api/members?treeId=${activeTreeId}` : "/api/members";
+        const memRes = await fetch(url);
         if (memRes.ok) {
           const updated: Member[] = await memRes.json();
           setMembers(updated);
@@ -107,20 +339,61 @@ export default function TreePage() {
     { picto: "†",   label: "Décédé·e",   color: "text-slate-500" },
   ];
 
+  const activeTree = trees.find(t => t.id === activeTreeId);
+
+  // ── Aucun arbre sélectionné ───────────────────────────────────
+  if (!activeTreeId) {
+    return (
+      <main className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-6 text-center px-4">
+        <div className="text-6xl">🌳</div>
+        <div>
+          <p className="text-xl font-semibold text-white mb-2">Aucun arbre sélectionné</p>
+          <p className="text-slate-400 text-sm">Choisissez un arbre depuis votre tableau de bord pour commencer.</p>
+        </div>
+        <a
+          href="/dashboard"
+          className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-xl transition-colors"
+        >
+          Aller au dashboard
+        </a>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-900 flex flex-col" style={{ height: "calc(100vh - 56px)" }}>
 
       {/* ── Barre de contrôle ─────────────────────────────────── */}
-      <div className="flex items-center gap-3 px-4 py-2.5 bg-slate-800/80 backdrop-blur border-b border-white/10 shrink-0">
-        <span className="text-white font-semibold text-sm hidden sm:block">Arbre 3D</span>
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-800/80 backdrop-blur border-b border-white/10 shrink-0 flex-wrap">
 
+        {/* Sélecteur d'arbre */}
+        {trees.length > 0 && (
+          <select
+            value={activeTreeId ?? ""}
+            onChange={e => handleTreeChange(e.target.value)}
+            className="bg-white/10 border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-40"
+          >
+            {trees.map(t => (
+              <option key={t.id} value={t.id} className="bg-slate-800">{t.name}</option>
+            ))}
+          </select>
+        )}
+
+        {/* Badge rôle */}
+        {treeRole && (
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${ROLE_COLORS[treeRole]}`}>
+            {ROLE_LABELS[treeRole]}
+          </span>
+        )}
+
+        {/* Sélecteur de membre */}
         {memberError ? (
           <p className="text-xs text-red-400 bg-red-900/30 px-3 py-1 rounded-lg">{memberError}</p>
         ) : members.length > 0 ? (
           <select
             value={selectedId}
             onChange={e => { setSelectedId(e.target.value); setPanel(null); }}
-            className="bg-white/10 border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-50"
+            className="bg-white/10 border border-white/10 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-44"
           >
             {members.map(m => (
               <option key={m.id} value={m.id} className="bg-slate-800">
@@ -128,15 +401,15 @@ export default function TreePage() {
               </option>
             ))}
           </select>
-        ) : (
+        ) : activeTreeId ? (
           <p className="text-xs text-slate-400">
             Aucun membre.{" "}
-            <a href="/members" className="text-indigo-400 underline">Ajoutez-en d&apos;abord.</a>
+            {canWrite(treeRole) && <a href="/members" className="text-indigo-400 underline">Ajoutez-en d&apos;abord.</a>}
           </p>
-        )}
+        ) : null}
 
         <div className="ml-auto flex items-center gap-2">
-          {/* Légende inline petite */}
+          {/* Légende inline */}
           <div className="hidden lg:flex items-center gap-3">
             {legendItems.map(({ picto, label, color }) => (
               <span key={label} className={`flex items-center gap-1 text-xs ${color}`}>
@@ -151,13 +424,7 @@ export default function TreePage() {
           >
             Légende
           </button>
-          <div className="hidden lg:flex text-xs text-slate-500 gap-3 ml-2 border-l border-white/10 pl-3">
-            <span>🖱 Drag = rotation</span>
-            <span>🔍 Scroll = zoom</span>
-            <span>Clic = info</span>
-          </div>
 
-          {/* Séparateur */}
           <div className="w-px h-5 bg-white/10 mx-1" />
 
           {/* Boutons vues caméra */}
@@ -168,12 +435,11 @@ export default function TreePage() {
             </button>
           ))}
 
-          {/* Séparateur */}
           <div className="w-px h-5 bg-white/10 mx-1" />
 
-          {/* Reset arbre */}
+          {/* Reset */}
           <button
-            title="Ferme les branches ouvertes et revient à la vue initiale de la personne sélectionnée"
+            title="Ferme les branches ouvertes et revient à la vue initiale"
             onClick={() => { setResetKey(k => k + 1); setViewMode("free"); setPanel(null); }}
             className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
@@ -191,9 +457,21 @@ export default function TreePage() {
             <span className="text-[10px] leading-none">Historique</span>
           </button>
 
-          {/* Export JSON */}
+          {/* Partager */}
+          {activeTreeId && canShare(treeRole) && (
+            <button
+              title="Partager cet arbre"
+              onClick={() => setShowShare(true)}
+              className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
+            >
+              <span className="text-sm">🔗</span>
+              <span className="text-[10px] leading-none">Partager</span>
+            </button>
+          )}
+
+          {/* Export */}
           <button
-            title="Télécharger l'arbre complet au format JSON"
+            title="Télécharger l'arbre au format JSON"
             onClick={handleExport}
             className="flex flex-col items-center gap-0.5 text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
           >
@@ -201,29 +479,29 @@ export default function TreePage() {
             <span className="text-[10px] leading-none">Exporter</span>
           </button>
 
-          {/* Import JSON */}
-          <label
-            title="Importer un arbre depuis un fichier JSON"
-            className="cursor-pointer flex flex-col items-center gap-0.5 text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
-          >
-            <span className="text-sm">📥</span>
-            <span className="text-[10px] leading-none">Importer</span>
-            <input
-              ref={importRef}
-              type="file"
-              accept=".json,application/json"
-              className="hidden"
-              onChange={handleImport}
-            />
-          </label>
+          {/* Import */}
+          {canWrite(treeRole) && (
+            <label
+              title="Importer un arbre depuis un fichier JSON"
+              className="cursor-pointer flex flex-col items-center gap-0.5 text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-white/10 transition-colors"
+            >
+              <span className="text-sm">📥</span>
+              <span className="text-[10px] leading-none">Importer</span>
+              <input
+                ref={importRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={handleImport}
+              />
+            </label>
+          )}
         </div>
       </div>
 
       {/* ── Zone canvas ───────────────────────────────────────── */}
       <div className="flex-1 relative overflow-hidden">
 
-        {/* Canvas 3D */}
-        {/* Notification import */}
         {importStatus && (
           <div className={`absolute top-3 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded-xl text-sm font-medium shadow-lg border ${
             importStatus.type === "ok"      ? "bg-emerald-900/90 text-emerald-300 border-emerald-700" :
@@ -243,10 +521,14 @@ export default function TreePage() {
             showHistory={showNavHistory}
             onSelectMember={handleSelectMember}
             onSelectUnion={handleSelectUnion}
+            treeId={activeTreeId ?? undefined}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-            Sélectionnez un membre pour démarrer.
+            {trees.length === 0
+              ? <span>Aucun arbre. <a href="/dashboard" className="text-indigo-400 underline">Créez-en un.</a></span>
+              : "Sélectionnez un membre pour démarrer."
+            }
           </div>
         )}
 
@@ -260,10 +542,6 @@ export default function TreePage() {
                 <span className="text-slate-300">{label}</span>
               </p>
             ))}
-            <div className="mt-3 pt-3 border-t border-white/10 text-xs text-slate-500 space-y-1">
-              <p>🎨 Couleur = lignée (nom de famille)</p>
-              <p>Clic sphère = infos + expansion</p>
-            </div>
           </div>
         )}
 
@@ -280,18 +558,22 @@ export default function TreePage() {
         {panel && (
           <div className="absolute top-3 left-3 z-20 w-80 bg-slate-900/95 backdrop-blur border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
 
-            {/* Panneau MEMBRE — vue */}
             {panel.type === "member" && !panel.editing && !panel.history && (
               <MemberPanel
                 member={panel.data}
                 members={members}
+                canWrite={canWrite(treeRole)}
+                canDelete={canDelete(treeRole)}
                 onEdit={() => setPanel({ ...panel, editing: true })}
                 onHistory={() => setPanel({ ...panel, history: true })}
                 onClose={() => setPanel(null)}
+                onDeleted={() => {
+                  setMembers(prev => prev.filter(m => m.id !== panel.data.id));
+                  setPanel(null);
+                }}
               />
             )}
 
-            {/* Panneau MEMBRE — historique */}
             {panel.type === "member" && !panel.editing && panel.history && (
               <MemberHistoryPanel
                 member={panel.data}
@@ -304,7 +586,6 @@ export default function TreePage() {
               />
             )}
 
-            {/* Panneau MEMBRE — édition */}
             {panel.type === "member" && panel.editing && (
               <div className="p-4">
                 <div className="flex items-center justify-between mb-4">
@@ -322,16 +603,17 @@ export default function TreePage() {
               </div>
             )}
 
-            {/* Panneau UNION — vue */}
             {panel.type === "union" && !panel.editing && (
               <UnionPanel
                 union={panel.data}
+                canWrite={canWrite(treeRole)}
+                canDelete={canDelete(treeRole)}
                 onEdit={() => setPanel({ ...panel, editing: true })}
                 onClose={() => setPanel(null)}
+                onDeleted={() => setPanel(null)}
               />
             )}
 
-            {/* Panneau UNION — édition */}
             {panel.type === "union" && panel.editing && (
               <div className="p-4">
                 <div className="flex items-center justify-between mb-4">
@@ -348,13 +630,29 @@ export default function TreePage() {
           </div>
         )}
       </div>
+
+      {/* ShareModal */}
+      {showShare && activeTreeId && (
+        <ShareModal treeId={activeTreeId} onClose={() => setShowShare(false)} />
+      )}
+
+      {/* Titre arbre courant (info flottante en bas) */}
+      {activeTree && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+          <span className="text-xs text-slate-500 bg-slate-900/60 px-3 py-1 rounded-full border border-white/5">
+            {activeTree.name}
+          </span>
+        </div>
+      )}
     </main>
   );
 }
 
 // ── Panneau membre ────────────────────────────────────────────────
-function MemberPanel({ member, members, onEdit, onHistory, onClose }: {
-  member: Member; members: Member[]; onEdit: () => void; onHistory: () => void; onClose: () => void;
+function MemberPanel({ member, members, canWrite: cw, canDelete: cd, onEdit, onHistory, onClose, onDeleted }: {
+  member: Member; members: Member[];
+  canWrite: boolean; canDelete: boolean;
+  onEdit: () => void; onHistory: () => void; onClose: () => void; onDeleted: () => void;
 }) {
   const father = members.find(m => m.id === member.father_id);
   const mother = members.find(m => m.id === member.mother_id);
@@ -367,14 +665,19 @@ function MemberPanel({ member, members, onEdit, onHistory, onClose }: {
 
   const genderLabel: Record<string, string> = { male: "♂ Homme", female: "♀ Femme", other: "⚥ Autre" };
 
+  const handleDelete = async () => {
+    if (!confirm(`Supprimer définitivement ${member.first_name} ${member.last_name} ?`)) return;
+    const res = await fetch(`/api/members/${member.id}`, { method: "DELETE" });
+    if (res.ok) onDeleted();
+  };
+
   return (
     <>
-      {/* Header avec photo */}
       <div className="relative">
         {member.photo_url ? (
-          <div className="h-32 overflow-hidden">
-            <img src={member.photo_url} alt={member.first_name} className="w-full h-full object-cover" />
-            <div className="absolute inset-0 bg-linear-to-t from-slate-900 via-slate-900/20 to-transparent" />
+          <div className="h-36 overflow-hidden flex items-center justify-center bg-slate-900">
+            <img src={member.photo_url} alt={member.first_name} className="max-w-full max-h-full object-contain" />
+            <div className="absolute inset-0 bg-linear-to-t from-slate-900 via-slate-900/30 to-transparent" />
           </div>
         ) : (
           <div className="h-20 bg-linear-to-br from-indigo-900 to-slate-900" />
@@ -390,7 +693,6 @@ function MemberPanel({ member, members, onEdit, onHistory, onClose }: {
         </div>
       </div>
 
-      {/* Infos */}
       <div className="pt-10 px-4 pb-4 space-y-3">
         <div>
           <p className="font-bold text-white text-base leading-tight">{member.first_name} {member.last_name.toUpperCase()}</p>
@@ -421,18 +723,28 @@ function MemberPanel({ member, members, onEdit, onHistory, onClose }: {
           {member.is_private && <InfoRowDark label="Visibilité" value="Profil privé 🔒" />}
         </div>
 
-        <button
-          onClick={onEdit}
-          className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-xl text-sm font-semibold transition-colors"
-        >
-          Modifier
-        </button>
+        {cw && (
+          <button
+            onClick={onEdit}
+            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-2 rounded-xl text-sm font-semibold transition-colors"
+          >
+            Modifier
+          </button>
+        )}
         <button
           onClick={onHistory}
-          className="w-full bg-slate-700/50 hover:bg-slate-700 text-slate-300 py-2 rounded-xl text-sm font-medium transition-colors mt-1"
+          className="w-full bg-slate-700/50 hover:bg-slate-700 text-slate-300 py-2 rounded-xl text-sm font-medium transition-colors"
         >
           Historique
         </button>
+        {cd && (
+          <button
+            onClick={handleDelete}
+            className="w-full text-red-400 hover:text-red-300 text-xs font-medium py-1"
+          >
+            🗑 Supprimer
+          </button>
+        )}
       </div>
     </>
   );
@@ -508,7 +820,6 @@ function MemberHistoryPanel({ member, onBack, onRestored, onClose }: {
     const res = await fetch(`/api/members/${member.id}/restore/${hid}`, { method: "POST" });
     if (res.ok) {
       const updated: Member = await res.json();
-      // Rafraîchir l'historique (l'entrée restaurée n'est plus enregistrée)
       const histRes = await fetch(`/api/members/${member.id}/history`);
       if (histRes.ok) setHistory(await histRes.json());
       onRestored(updated);
@@ -531,7 +842,6 @@ function MemberHistoryPanel({ member, onBack, onRestored, onClose }: {
           <p className="text-slate-500 text-xs text-center py-4">Aucun historique disponible</p>
         )}
 
-        {/* Version actuelle */}
         {!loading && history.length > 0 && (
           <div className="bg-indigo-600/10 border border-indigo-500/20 rounded-xl p-3 text-xs">
             <p className="text-indigo-400 font-semibold mb-1">Version actuelle</p>
@@ -542,9 +852,6 @@ function MemberHistoryPanel({ member, onBack, onRestored, onClose }: {
         )}
 
         {history.map((entry, i) => {
-          // afterState = état APRÈS la modification sauvegardée dans cette entrée
-          // i=0 → l'état après = la version actuelle (member)
-          // i>0 → l'état après = l'entrée précédente dans la liste (history[i-1])
           const afterState: HistoryLike = i === 0 ? member : history[i - 1];
           const diffs = buildDiff(entry, afterState);
 
@@ -587,13 +894,22 @@ function MemberHistoryPanel({ member, onBack, onRestored, onClose }: {
 }
 
 // ── Panneau union ─────────────────────────────────────────────────
-function UnionPanel({ union, onEdit, onClose }: { union: Spouse; onEdit: () => void; onClose: () => void }) {
+function UnionPanel({ union, canWrite: cw, canDelete: cd, onEdit, onClose, onDeleted }: {
+  union: Spouse; canWrite: boolean; canDelete: boolean;
+  onEdit: () => void; onClose: () => void; onDeleted: () => void;
+}) {
   const sep = !!union.separation_date;
   const isCouple = union.union_type === "couple";
   const picto = isCouple ? (sep ? "💔" : "♥") : (sep ? "💍✗" : "💍");
   const label = isCouple ? (sep ? "Ex-couple" : "Couple") : (sep ? "Divorcé·e" : "Marié·e");
   const color = isCouple ? (sep ? "from-slate-700 to-slate-800" : "from-pink-800 to-rose-900")
                          : (sep ? "from-slate-700 to-slate-800" : "from-amber-800 to-yellow-900");
+
+  const handleDelete = async () => {
+    if (!confirm("Supprimer cette union ?")) return;
+    const res = await fetch(`/api/relations/${union.id}`, { method: "DELETE" });
+    if (res.ok) onDeleted();
+  };
 
   return (
     <>
@@ -614,12 +930,22 @@ function UnionPanel({ union, onEdit, onClose }: { union: Spouse; onEdit: () => v
         {!union.union_date && !union.separation_date && (
           <p className="text-slate-500 text-xs">Aucune date renseignée</p>
         )}
-        <button
-          onClick={onEdit}
-          className="w-full bg-pink-600 hover:bg-pink-500 text-white py-2 rounded-xl text-sm font-semibold transition-colors mt-2"
-        >
-          Modifier
-        </button>
+        {cw && (
+          <button
+            onClick={onEdit}
+            className="w-full bg-pink-600 hover:bg-pink-500 text-white py-2 rounded-xl text-sm font-semibold transition-colors mt-2"
+          >
+            Modifier
+          </button>
+        )}
+        {cd && (
+          <button
+            onClick={handleDelete}
+            className="w-full text-red-400 hover:text-red-300 text-xs font-medium py-1"
+          >
+            🗑 Supprimer l&apos;union
+          </button>
+        )}
       </div>
     </>
   );
@@ -694,7 +1020,6 @@ function EditMemberForm({ member, onCancel, onSuccess }: { member: Member; onCan
         <p className="text-red-400 text-xs bg-red-900/30 px-3 py-2 rounded-lg">{submitError}</p>
       )}
 
-      {/* Photo */}
       <div className="flex items-center gap-3">
         <div className="w-12 h-12 rounded-full bg-white/10 border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
           {preview
@@ -832,4 +1157,3 @@ function EditUnionForm({ union, onCancel, onSuccess }: { union: Spouse; onCancel
     </form>
   );
 }
-

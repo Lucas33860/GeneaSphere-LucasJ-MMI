@@ -4,12 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { useSearchParams } from "next/navigation";
 import type { Member } from "@/types";
+import type { TreeRole } from "@/lib/tree-access";
 import { inputCls } from "@/lib/ui";
 import { uploadMemberPhoto } from "@/lib/supabase/storage";
 import { type UnionState4, UNION_STATE_OPTIONS, stateToBody } from "@/lib/union";
 import { UnionStateSelector } from "@/components/union/UnionStateSelector";
 import { MemberCard } from "@/components/members/MemberCard";
+
+const canWrite  = (r: TreeRole | null) => r === "owner" || r === "admin" || r === "editor";
+const canDelete = (r: TreeRole | null) => r === "owner" || r === "admin";
 
 // ── Schemas ───────────────────────────────────────────────────────
 const addMemberSchema = z.object({
@@ -42,6 +47,10 @@ type Panel = "add" | "union" | null;
 
 // ── Composant principal ───────────────────────────────────────────
 export default function MembersPage() {
+  const searchParams = useSearchParams();
+  const treeId = searchParams.get("treeId");
+  const [treeRole, setTreeRole] = useState<TreeRole | null>(null);
+
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [panel, setPanel] = useState<Panel>(null);
@@ -49,17 +58,27 @@ export default function MembersPage() {
   const [feedback, setFeedback] = useState<{ type: "ok" | "err"; msg: string } | null>(null);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
 
+  // Charger le rôle sur l'arbre courant
+  useEffect(() => {
+    if (!treeId) return;
+    fetch(`/api/trees/${treeId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setTreeRole(d.role as TreeRole); })
+      .catch(() => {});
+  }, [treeId]);
+
   const notify = (type: "ok" | "err", msg: string) => {
     setFeedback({ type, msg });
     setTimeout(() => setFeedback(null), 3000);
   };
 
   const fetchMembers = useCallback(async () => {
-    const res = await fetch("/api/members").catch(() => null);
+    const qs = treeId ? `?treeId=${treeId}` : "";
+    const res = await fetch(`/api/members${qs}`).catch(() => null);
     if (!res) { notify("err", "Impossible de charger les membres"); setLoading(false); return; }
     if (res.ok) setMembers(await res.json());
     setLoading(false);
-  }, []);
+  }, [treeId]);
 
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
 
@@ -72,6 +91,21 @@ export default function MembersPage() {
   const living  = members.filter(m => !m.death_date).length;
   const deceased = members.filter(m =>  m.death_date).length;
 
+  if (!treeId) {
+    return (
+      <main className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-6 text-center px-4">
+        <div className="text-6xl">👥</div>
+        <div>
+          <p className="text-xl font-semibold text-slate-800 mb-2">Aucun arbre sélectionné</p>
+          <p className="text-slate-400 text-sm">Choisissez un arbre depuis votre tableau de bord pour voir ses membres.</p>
+        </div>
+        <a href="/dashboard" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-xl transition-colors">
+          Aller au dashboard
+        </a>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-50">
 
@@ -83,14 +117,16 @@ export default function MembersPage() {
               <h1 className="text-3xl font-bold text-white">Membres</h1>
               <p className="text-slate-400 mt-1 text-sm">Gérez les personnes de votre arbre généalogique</p>
             </div>
-            <div className="flex gap-3">
-              <HeroBtn active={panel === "add"} color="indigo" onClick={() => togglePanel("add")}>
-                + Ajouter
-              </HeroBtn>
-              <HeroBtn active={panel === "union"} color="pink" onClick={() => togglePanel("union")}>
-                💞 Union
-              </HeroBtn>
-            </div>
+            {canWrite(treeRole) && (
+              <div className="flex gap-3">
+                <HeroBtn active={panel === "add"} color="indigo" onClick={() => togglePanel("add")}>
+                  + Ajouter
+                </HeroBtn>
+                <HeroBtn active={panel === "union"} color="pink" onClick={() => togglePanel("union")}>
+                  💞 Union
+                </HeroBtn>
+              </div>
+            )}
           </div>
 
           {/* Stats rapides */}
@@ -126,6 +162,7 @@ export default function MembersPage() {
         {panel === "add" && (
           <AddMemberForm
             members={members}
+            treeId={treeId ?? undefined}
             onSuccess={() => { notify("ok", "Membre ajouté."); fetchMembers(); setPanel(null); }}
             onError={(m) => notify("err", m)}
           />
@@ -133,6 +170,7 @@ export default function MembersPage() {
         {panel === "union" && (
           <UnionForm
             members={members}
+            treeId={treeId ?? undefined}
             onSuccess={() => { notify("ok", "Union créée."); fetchMembers(); setPanel(null); }}
             onError={(m) => notify("err", m)}
           />
@@ -192,6 +230,8 @@ export default function MembersPage() {
         <EditMemberModal
           member={selectedMember}
           members={members}
+          canWrite={canWrite(treeRole)}
+          canDelete={canDelete(treeRole)}
           onClose={() => setSelectedMember(null)}
           onSaved={() => {
             notify("ok", "Modifications enregistrées.");
@@ -233,9 +273,11 @@ function Field({ label, error, children }: { label: string; error?: string; chil
 }
 
 // ── Modal édition complète d'un membre ───────────────────────────
-function EditMemberModal({ member, members, onClose, onSaved, onDeleted }: {
+function EditMemberModal({ member, members, canWrite: cw = true, canDelete: cd = true, onClose, onSaved, onDeleted }: {
   member: Member;
   members: Member[];
+  canWrite?: boolean;
+  canDelete?: boolean;
   onClose: () => void;
   onSaved: () => void;
   onDeleted: () => void;
@@ -423,29 +465,33 @@ function EditMemberModal({ member, members, onClose, onSaved, onDeleted }: {
             </div>
 
             <div className="border-t border-slate-100 pt-4 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={deleting}
-                className="text-sm text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
-              >
-                {deleting ? "Suppression…" : "🗑 Supprimer"}
-              </button>
+              {cd ? (
+                <button
+                  type="button"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="text-sm text-red-500 hover:text-red-700 font-medium disabled:opacity-50"
+                >
+                  {deleting ? "Suppression…" : "🗑 Supprimer"}
+                </button>
+              ) : <span />}
               <div className="flex gap-3">
                 <button
                   type="button"
                   onClick={onClose}
                   className="px-4 py-2 text-sm text-slate-500 hover:text-slate-700 font-medium"
                 >
-                  Annuler
+                  {cw ? "Annuler" : "Fermer"}
                 </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting || uploading}
-                  className="px-5 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                >
-                  {uploading ? "Upload…" : isSubmitting ? "Sauvegarde…" : "Enregistrer"}
-                </button>
+                {cw && (
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || uploading}
+                    className="px-5 py-2 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                  >
+                    {uploading ? "Upload…" : isSubmitting ? "Sauvegarde…" : "Enregistrer"}
+                  </button>
+                )}
               </div>
             </div>
           </form>
@@ -456,8 +502,9 @@ function EditMemberModal({ member, members, onClose, onSaved, onDeleted }: {
 }
 
 // ── Formulaire : ajouter un membre ────────────────────────────────
-function AddMemberForm({ members, onSuccess, onError }: {
+function AddMemberForm({ members, treeId, onSuccess, onError }: {
   members: Member[];
+  treeId?: string;
   onSuccess: () => void;
   onError: (m: string) => void;
 }) {
@@ -488,6 +535,7 @@ function AddMemberForm({ members, onSuccess, onError }: {
       father_id:   data.father_id   || null,
       mother_id:   data.mother_id   || null,
       photo_url:   photoUrl,
+      ...(treeId ? { treeId } : {}),
     };
     const res = await fetch("/api/members", {
       method: "POST",
@@ -596,8 +644,9 @@ function AddMemberForm({ members, onSuccess, onError }: {
 }
 
 // ── Formulaire : créer une union ──────────────────────────────────
-function UnionForm({ members, onSuccess, onError }: {
+function UnionForm({ members, treeId, onSuccess, onError }: {
   members: Member[];
+  treeId?: string;
   onSuccess: () => void;
   onError: (m: string) => void;
 }) {
@@ -625,7 +674,7 @@ function UnionForm({ members, onSuccess, onError }: {
     const res = await fetch("/api/relations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "spouse", member1_id: data.member1_id, member2_id: data.member2_id, ...stateToBody(state, data.date) }),
+      body: JSON.stringify({ type: "spouse", member1_id: data.member1_id, member2_id: data.member2_id, ...(treeId ? { treeId } : {}), ...stateToBody(state, data.date) }),
     });
     setSubmitting(false);
     if (!res.ok) { onError((await res.json()).error ?? "Erreur"); return; }

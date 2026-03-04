@@ -10,6 +10,7 @@ export interface Profile {
 
 export interface Member {
   id: string;
+  tree_id: string;
   first_name: string;
   last_name: string;
   gender: "male" | "female" | "other" | null;
@@ -28,6 +29,7 @@ export interface Member {
 
 export interface Spouse {
   id: string;
+  tree_id: string;
   member1_id: string;
   member2_id: string;
   union_type: 'couple' | 'marriage';
@@ -35,3 +37,22 @@ export interface Spouse {
   separation_date: string | null;
 }
 
+export interface Tree {
+  id: string;
+  name: string;
+  owner_id: string;
+  created_at: string;
+  role?: "owner" | "admin" | "editor" | "reader";
+  owner_name?: string;
+  member_count?: number;
+}
+
+export interface TreeAccessEntry {
+  id: string;
+  tree_id: string;
+  user_id: string;
+  role: "reader" | "editor" | "admin";
+  granted_at: string;
+  user_name?: string;
+  user_email?: string;
+}

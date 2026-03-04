@@ -2,10 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
+import { useSearchParams } from "next/navigation";
 import type { Member } from "@/types";
+import type { TreeRole } from "@/lib/tree-access";
 import { inputCls } from "@/lib/ui";
 import { type UnionState4, UNION_STATE_OPTIONS, stateToBody, unionToState4 } from "@/lib/union";
 import { UnionStateSelector } from "@/components/union/UnionStateSelector";
+
+const canWrite  = (r: TreeRole | null) => r === "owner" || r === "admin" || r === "editor";
+const canDelete = (r: TreeRole | null) => r === "owner" || r === "admin";
 
 // ── Types ─────────────────────────────────────────────────────────
 interface MemberSnap { id: string; first_name: string; last_name: string }
@@ -36,6 +41,10 @@ const fmtDate  = (d: string | null) => d ? new Date(d).toLocaleDateString("fr-FR
 
 // ── Page principale ───────────────────────────────────────────────
 export default function RelationsPage() {
+  const searchParams = useSearchParams();
+  const treeId = searchParams.get("treeId");
+  const [treeRole, setTreeRole] = useState<TreeRole | null>(null);
+
   const [unions,     setUnions]     = useState<UnionRow[]>([]);
   const [parentages, setParentages] = useState<ParentageRow[]>([]);
   const [members,    setMembers]    = useState<Member[]>([]);
@@ -46,6 +55,15 @@ export default function RelationsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showUnionForm, setShowUnionForm] = useState(false);
 
+  // Charger le rôle sur l'arbre courant
+  useEffect(() => {
+    if (!treeId) return;
+    fetch(`/api/trees/${treeId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setTreeRole(d.role as TreeRole); })
+      .catch(() => {});
+  }, [treeId]);
+
   const notify = (type: "ok" | "err", msg: string) => {
     setFeedback({ type, msg });
     setTimeout(() => setFeedback(null), 3500);
@@ -54,7 +72,8 @@ export default function RelationsPage() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [relRes, memRes] = await Promise.all([fetch("/api/relations"), fetch("/api/members")]);
+      const qs = treeId ? `?treeId=${treeId}` : "";
+      const [relRes, memRes] = await Promise.all([fetch(`/api/relations${qs}`), fetch(`/api/members${qs}`)]);
       if (relRes.ok) {
         const rel = await relRes.json();
         setUnions(rel.unions ?? []);
@@ -63,7 +82,7 @@ export default function RelationsPage() {
       if (memRes.ok) setMembers(await memRes.json());
     } catch { notify("err", "Impossible de charger les relations"); }
     setLoading(false);
-  }, []);
+  }, [treeId]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
@@ -84,6 +103,21 @@ export default function RelationsPage() {
     if (res.ok) { notify("ok", "Parenté supprimée."); loadAll(); }
     else notify("err", (await res.json()).error ?? "Erreur");
   };
+
+  if (!treeId) {
+    return (
+      <main className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-6 text-center px-4">
+        <div className="text-6xl">💞</div>
+        <div>
+          <p className="text-xl font-semibold text-slate-800 mb-2">Aucun arbre sélectionné</p>
+          <p className="text-slate-400 text-sm">Choisissez un arbre depuis votre tableau de bord pour voir ses relations.</p>
+        </div>
+        <a href="/dashboard" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-xl transition-colors">
+          Aller au dashboard
+        </a>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -139,6 +173,7 @@ export default function RelationsPage() {
         {showUnionForm && (
           <UnionForm
             members={members}
+            treeId={treeId ?? undefined}
             onSuccess={() => { setShowUnionForm(false); notify("ok", "Union créée."); loadAll(); }}
             onError={m => notify("err", m)}
           />
@@ -174,6 +209,8 @@ export default function RelationsPage() {
                       ) : (
                         <UnionCard
                           union={u}
+                          canWrite={canWrite(treeRole)}
+                          canDelete={canDelete(treeRole)}
                           onEdit={() => setEditingUnion(u)}
                           onDelete={() => deleteUnion(u.id)}
                           deleting={deletingId === u.id}
@@ -209,6 +246,8 @@ export default function RelationsPage() {
                       ) : (
                         <ParentageCard
                           parentage={p}
+                          canWrite={canWrite(treeRole)}
+                          canDelete={canDelete(treeRole)}
                           onEdit={() => setEditingParentage(p)}
                           onDelete={() => deleteParentage(p.id)}
                           deleting={deletingId === p.id}
@@ -234,8 +273,9 @@ function unionPictoLabel(u: UnionRow) {
 }
 
 // ── Carte union ───────────────────────────────────────────────────
-function UnionCard({ union, onEdit, onDelete, deleting }: {
-  union: UnionRow; onEdit: () => void; onDelete: () => void; deleting?: boolean;
+function UnionCard({ union, canWrite: cw, canDelete: cd, onEdit, onDelete, deleting }: {
+  union: UnionRow; canWrite?: boolean; canDelete?: boolean;
+  onEdit: () => void; onDelete: () => void; deleting?: boolean;
 }) {
   const { picto, label, bg } = unionPictoLabel(union);
   const isSep = !!union.separation_date;
@@ -254,16 +294,22 @@ function UnionCard({ union, onEdit, onDelete, deleting }: {
           {!isSep && fmtDate(union.union_date) ? ` · depuis le ${fmtDate(union.union_date)}` : ""}
         </p>
       </div>
-      <div className="flex gap-2 shrink-0">
-        <button onClick={onEdit} disabled={deleting}
-          className="px-3 py-1.5 text-xs rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 font-medium disabled:opacity-50">
-          Modifier
-        </button>
-        <button onClick={onDelete} disabled={deleting}
-          className="px-3 py-1.5 text-xs rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-medium disabled:opacity-50">
-          {deleting ? "…" : "Supprimer"}
-        </button>
-      </div>
+      {(cw !== false || cd !== false) && (
+        <div className="flex gap-2 shrink-0">
+          {cw !== false && (
+            <button onClick={onEdit} disabled={deleting}
+              className="px-3 py-1.5 text-xs rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 font-medium disabled:opacity-50">
+              Modifier
+            </button>
+          )}
+          {cd !== false && (
+            <button onClick={onDelete} disabled={deleting}
+              className="px-3 py-1.5 text-xs rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-medium disabled:opacity-50">
+              {deleting ? "…" : "Supprimer"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -325,8 +371,9 @@ function EditUnionForm({ union, onCancel, onSuccess, onError }: {
 }
 
 // ── Carte parenté ─────────────────────────────────────────────────
-function ParentageCard({ parentage, onEdit, onDelete, deleting }: {
-  parentage: ParentageRow; onEdit: () => void; onDelete: () => void; deleting?: boolean;
+function ParentageCard({ parentage, canWrite: cw, canDelete: cd, onEdit, onDelete, deleting }: {
+  parentage: ParentageRow; canWrite?: boolean; canDelete?: boolean;
+  onEdit: () => void; onDelete: () => void; deleting?: boolean;
 }) {
   return (
     <div className="bg-white border border-slate-100 rounded-2xl shadow-sm p-4 flex items-center gap-4">
@@ -341,16 +388,22 @@ function ParentageCard({ parentage, onEdit, onDelete, deleting }: {
           {parentage.mother ? `👩 ${fullName(parentage.mother)}` : "Mère inconnue"}
         </p>
       </div>
-      <div className="flex gap-2 shrink-0">
-        <button onClick={onEdit} disabled={deleting}
-          className="px-3 py-1.5 text-xs rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 font-medium disabled:opacity-50">
-          Modifier
-        </button>
-        <button onClick={onDelete} disabled={deleting}
-          className="px-3 py-1.5 text-xs rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-medium disabled:opacity-50">
-          {deleting ? "…" : "Supprimer"}
-        </button>
-      </div>
+      {(cw !== false || cd !== false) && (
+        <div className="flex gap-2 shrink-0">
+          {cw !== false && (
+            <button onClick={onEdit} disabled={deleting}
+              className="px-3 py-1.5 text-xs rounded-lg bg-slate-50 text-slate-700 hover:bg-slate-100 font-medium disabled:opacity-50">
+              Modifier
+            </button>
+          )}
+          {cd !== false && (
+            <button onClick={onDelete} disabled={deleting}
+              className="px-3 py-1.5 text-xs rounded-lg bg-red-50 text-red-600 hover:bg-red-100 font-medium disabled:opacity-50">
+              {deleting ? "…" : "Supprimer"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -412,8 +465,8 @@ function EditParentageForm({ parentage, members, onCancel, onSuccess, onError }:
 }
 
 // ── Formulaire nouvelle union ─────────────────────────────────────
-function UnionForm({ members, onSuccess, onError }: {
-  members: Member[]; onSuccess: () => void; onError: (m: string) => void;
+function UnionForm({ members, treeId, onSuccess, onError }: {
+  members: Member[]; treeId?: string; onSuccess: () => void; onError: (m: string) => void;
 }) {
   const [state, setState] = useState<UnionState4 | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -439,7 +492,7 @@ function UnionForm({ members, onSuccess, onError }: {
     const res = await fetch("/api/relations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "spouse", member1_id: data.member1_id, member2_id: data.member2_id, ...stateToBody(state, data.date) }),
+      body: JSON.stringify({ type: "spouse", member1_id: data.member1_id, member2_id: data.member2_id, ...(treeId ? { treeId } : {}), ...stateToBody(state, data.date) }),
     });
     setSubmitting(false);
     if (!res.ok) { onError((await res.json()).error ?? "Erreur"); return; }
