@@ -1,5 +1,5 @@
 "use client";
-
+import { Suspense } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "next/navigation";
@@ -41,6 +41,10 @@ const fmtDate  = (d: string | null) => d ? new Date(d).toLocaleDateString("fr-FR
 
 // ── Page principale ───────────────────────────────────────────────
 export default function RelationsPage() {
+  return <Suspense><RelationsPageContent /></Suspense>;
+}
+
+function RelationsPageContent() {
   const searchParams = useSearchParams();
   const treeId = searchParams.get("treeId");
   const [treeRole, setTreeRole] = useState<TreeRole | null>(null);

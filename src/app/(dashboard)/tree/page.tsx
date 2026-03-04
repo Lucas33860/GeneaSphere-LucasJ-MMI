@@ -1,5 +1,5 @@
 "use client";
-
+import { Suspense } from "react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -218,6 +218,10 @@ function ShareModal({ treeId, onClose }: { treeId: string; onClose: () => void }
 
 // ── Page principale ───────────────────────────────────────────────
 export default function TreePage() {
+  return <Suspense><TreePageContent /></Suspense>;
+}
+
+function TreePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 

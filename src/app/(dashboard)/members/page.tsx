@@ -1,5 +1,5 @@
 "use client";
-
+import { Suspense } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,6 +47,10 @@ type Panel = "add" | "union" | null;
 
 // ── Composant principal ───────────────────────────────────────────
 export default function MembersPage() {
+  return <Suspense><MembersPageContent /></Suspense>;
+}
+
+function MembersPageContent() {
   const searchParams = useSearchParams();
   const treeId = searchParams.get("treeId");
   const [treeRole, setTreeRole] = useState<TreeRole | null>(null);

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { LogoutButton } from "@/components/ui/LogoutButton";
 import { NavLinks } from "@/components/ui/NavLinks";
 
@@ -11,7 +12,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <span className="text-xl">🌳</span>
             <span className="font-bold text-white tracking-tight hidden sm:block">GeneaSphere</span>
           </Link>
-          <NavLinks />
+          <Suspense fallback={<div className="flex gap-1 h-8" />}>
+            <NavLinks />
+          </Suspense>
           <div className="ml-auto flex items-center">
             <LogoutButton />
           </div>

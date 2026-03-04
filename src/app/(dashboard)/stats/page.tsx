@@ -1,4 +1,5 @@
 "use client";
+import { Suspense } from "react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -24,6 +25,10 @@ interface Stats {
 }
 
 export default function StatsPage() {
+  return <Suspense><StatsPageContent /></Suspense>;
+}
+
+function StatsPageContent() {
   const searchParams = useSearchParams();
   const treeId = searchParams.get("treeId");
 
