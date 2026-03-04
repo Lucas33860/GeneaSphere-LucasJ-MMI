@@ -1,10 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, memo, Component, type ReactNode } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Text, Line, Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import type { Member, Spouse } from "@/types";
+
+// ── ErrorBoundary pour le canvas WebGL ────────────────────────────
+class CanvasErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null };
+  static getDerivedStateFromError(e: Error) { return { error: e.message }; }
+  render() {
+    if (this.state.error) return (
+      <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
+        <p className="text-4xl">⚠️</p>
+        <p className="text-white font-semibold">Erreur de rendu 3D</p>
+        <p className="text-slate-400 text-sm">Votre appareil ne supporte peut-être pas WebGL.</p>
+        <button onClick={() => this.setState({ error: null })} className="text-indigo-400 text-sm underline">Réessayer</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
 
 // ── Types internes ────────────────────────────────────────────────
 interface GraphPerson {
@@ -110,15 +127,15 @@ function findFreePos(
 }
 
 // ── PersonSphere ──────────────────────────────────────────────────
-function PersonSphere({ node, onClick }: {
+const PersonSphere = memo(function PersonSphere({ node, onClick }: {
   node: GraphPerson;
   onClick: (n: GraphPerson) => void;
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const [hovered, setHovered] = useState(false);
-  const color   = nameToHex(node.member.last_name);
-  const isDead  = !!node.member.death_date;
-  const fullName = `${node.member.first_name} ${node.member.last_name.toUpperCase()}`;
+  const color    = nameToHex(node.member.last_name ?? "");
+  const isDead   = !!node.member.death_date;
+  const fullName = `${node.member.first_name ?? ""} ${(node.member.last_name ?? "").toUpperCase()}`;
 
   useFrame(() => {
     if (!meshRef.current) return;
@@ -137,7 +154,7 @@ function PersonSphere({ node, onClick }: {
         onPointerOver={e => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }}
         onPointerOut={() => { setHovered(false); document.body.style.cursor = "default"; }}
       >
-        <sphereGeometry args={[0.9, 32, 32]} />
+        <sphereGeometry args={[0.9, 14, 14]} />
         <meshStandardMaterial color={color} opacity={isDead ? 0.5 : 1} transparent={isDead} roughness={0.35} metalness={0.15} />
       </mesh>
 
@@ -163,16 +180,16 @@ function PersonSphere({ node, onClick }: {
       </Billboard>
       {hovered && (
         <mesh>
-          <sphereGeometry args={[1.08, 32, 32]} />
+          <sphereGeometry args={[1.08, 14, 14]} />
           <meshStandardMaterial color="white" transparent opacity={0.1} depthWrite={false} />
         </mesh>
       )}
     </group>
   );
-}
+});
 
 // ── UnionSphere ───────────────────────────────────────────────────
-function UnionSphere({ node, onClick, selected }: { node: GraphUnion; onClick?: (u: Spouse, nodeId: string) => void; selected: boolean }) {
+const UnionSphere = memo(function UnionSphere({ node, onClick, selected }: { node: GraphUnion; onClick?: (u: Spouse, nodeId: string) => void; selected: boolean }) {
   const [hovered, setHovered] = useState(false);
   const meshRef = useRef<THREE.Mesh>(null);
   const color = node.union ? unionColor(node.union) : "#9ca3af";
@@ -196,12 +213,12 @@ function UnionSphere({ node, onClick, selected }: { node: GraphUnion; onClick?: 
         onPointerOver={clickable ? (e => { e.stopPropagation(); setHovered(true); document.body.style.cursor = "pointer"; }) : undefined}
         onPointerOut={clickable ? (() => { setHovered(false); document.body.style.cursor = "default"; }) : undefined}
       >
-        <sphereGeometry args={[0.4, 24, 24]} />
+        <sphereGeometry args={[0.4, 10, 10]} />
         <meshStandardMaterial color={color} roughness={0.3} metalness={0.2} emissive={selected ? "#ffffff" : hovered ? color : "#000000"} emissiveIntensity={selected ? 0.6 : hovered ? 0.4 : 0} />
       </mesh>
       {selected && (
         <mesh>
-          <sphereGeometry args={[0.72, 24, 24]} />
+          <sphereGeometry args={[0.72, 10, 10]} />
           <meshStandardMaterial color="#a78bfa" transparent opacity={0.35} depthWrite={false} />
         </mesh>
       )}
@@ -212,12 +229,12 @@ function UnionSphere({ node, onClick, selected }: { node: GraphUnion; onClick?: 
       </Billboard>
     </group>
   );
-}
+});
 
 // ── Edge ──────────────────────────────────────────────────────────
-function Edge({ edge, highlighted }: { edge: GraphEdge; highlighted: boolean }) {
+const Edge = memo(function Edge({ edge, highlighted }: { edge: GraphEdge; highlighted: boolean }) {
   return <Line points={[edge.from, edge.to]} color={highlighted ? "#a78bfa" : "#475569"} lineWidth={highlighted ? 3.5 : 1.5} />;
-}
+});
 
 
 // ── Camera focus (lerp vers la cible) ────────────────────────────
@@ -932,10 +949,13 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
   }, [onSelectUnion]);
 
   return (
-    <div style={{ position: "relative", width: "100%", height: "100%" }}>
+    <div style={{ position: "absolute", inset: 0 }}>
+      <CanvasErrorBoundary>
       <Canvas
         camera={{ position: [4, 35, 55], fov: 60 }}
         style={{ background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)" }}
+        gl={{ antialias: true, powerPreference: "high-performance" }}
+        dpr={[1, 1.5]}
         onClick={() => setSelectedUnionId(null)}
       >
         <CameraReset trigger={cameraReset} />
@@ -953,6 +973,7 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
         {unions.map(u  => <UnionSphere key={u.id} node={u} onClick={handleClickUnion} selected={selectedUnionId === u.id} />)}
         {persons.map(p => <PersonSphere key={p.id} node={p} onClick={handleClickPerson} />)}
       </Canvas>
+      </CanvasErrorBoundary>
 
       {/* ── Panneau historique de navigation ──────────────── */}
       {showHistory && (

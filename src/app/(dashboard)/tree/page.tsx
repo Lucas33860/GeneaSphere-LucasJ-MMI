@@ -4,9 +4,23 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FamilyTree3D, type ViewMode } from "@/components/tree/FamilyTree3D";
+import type { ViewMode } from "@/components/tree/FamilyTree3D";
 import type { Member, Spouse, Tree, TreeAccessEntry } from "@/types";
+
+const FamilyTree3D = dynamic(
+  () => import("@/components/tree/FamilyTree3D").then(m => ({ default: m.FamilyTree3D })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        <p className="text-slate-400 text-sm">Chargement de l&apos;arbre…</p>
+      </div>
+    ),
+  }
+);
 import type { TreeRole } from "@/lib/tree-access";
 import { darkInputCls } from "@/lib/ui";
 import { uploadMemberPhoto } from "@/lib/supabase/storage";
