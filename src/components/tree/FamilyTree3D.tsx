@@ -333,11 +333,18 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
   const unionsRef  = useRef<GraphUnion[]>([]);
   const edgesRef   = useRef<GraphEdge[]>([]);
 
+  // Annulation des timeouts pendants lors d'un reset
+  const pendingTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+
   // Historique navigation (Ctrl+Z + panneau visuel)
   const navHistoryRef = useRef<NavEntry[]>([]);
-  const [navEntries, setNavEntries] = useState<NavEntry[]>([]);;
+  const [navEntries, setNavEntries] = useState<NavEntry[]>([]);
 
   useEffect(() => {
+    // Annuler tous les timeouts en cours pour éviter les doublons
+    pendingTimeoutsRef.current.forEach(clearTimeout);
+    pendingTimeoutsRef.current = [];
+
     setPersons([]); setUnions([]); setEdges([]);
     personsRef.current = []; unionsRef.current = []; edgesRef.current = [];
     navHistoryRef.current = [];
@@ -754,14 +761,24 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
       ps: GraphPerson[], us: GraphUnion[], es: GraphEdge[], delayMs: number,
     ) => {
       const bt = now + delayMs;
-      setTimeout(() => {
-        if (ps.length) setPersons(prev => [...prev, ...ps.map(p => ({ ...p, birthTime: bt }))]);
-        if (us.length) setUnions(prev  => [...prev, ...us.map(u => ({ ...u, birthTime: bt }))]);
+      const tid = setTimeout(() => {
+        if (ps.length) setPersons(prev => {
+          const seen = new Set(prev.map(p => p.id));
+          const fresh = ps.filter(p => !seen.has(p.id)).map(p => ({ ...p, birthTime: bt }));
+          return fresh.length ? [...prev, ...fresh] : prev;
+        });
+        if (us.length) setUnions(prev => {
+          const seen = new Set(prev.map(u => u.id));
+          const fresh = us.filter(u => !seen.has(u.id)).map(u => ({ ...u, birthTime: bt }));
+          return fresh.length ? [...prev, ...fresh] : prev;
+        });
         if (es.length) setEdges(prev => {
           const seen = new Set(prev.map(e => e.id));
-          return [...prev, ...es.filter(e => !seen.has(e.id))];
+          const fresh = es.filter(e => !seen.has(e.id));
+          return fresh.length ? [...prev, ...fresh] : prev;
         });
       }, delayMs);
+      pendingTimeoutsRef.current.push(tid);
     };
 
     // Triage des nœuds
