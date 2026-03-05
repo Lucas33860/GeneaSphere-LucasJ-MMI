@@ -97,13 +97,12 @@ function MembersPageContent() {
 
   if (!treeId) {
     return (
-      <main className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-6 text-center px-4">
-        <div className="text-6xl">👥</div>
+      <main className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6 text-center px-4">
         <div>
-          <p className="text-xl font-semibold text-slate-800 mb-2">Aucun arbre sélectionné</p>
-          <p className="text-slate-400 text-sm">Choisissez un arbre depuis votre tableau de bord pour voir ses membres.</p>
+          <p className="text-xl font-semibold text-zinc-800 mb-2">Aucun arbre sélectionné</p>
+          <p className="text-zinc-400 text-sm">Choisissez un arbre depuis votre tableau de bord pour voir ses membres.</p>
         </div>
-        <a href="/dashboard" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-xl transition-colors">
+        <a href="/dashboard" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
           Aller au dashboard
         </a>
       </main>
@@ -111,41 +110,41 @@ function MembersPageContent() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="min-h-screen bg-zinc-50">
 
-      {/* ── Hero ────────────────────────────────────────────────── */}
-      <div className="bg-linear-to-br from-slate-900 via-blue-950 to-slate-900 px-4 py-10">
-        <div className="max-w-5xl mx-auto">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-white">Membres</h1>
-              <p className="text-slate-400 mt-1 text-sm">Gérez les personnes de votre arbre généalogique</p>
+      {/* ── En-tête ───────────────────────────────────────────────── */}
+      <div className="bg-white border-b border-zinc-100 px-4 py-6 shadow-sm">
+        <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-black text-zinc-900 tracking-tight">Membres</h1>
+            <div className="flex gap-4 mt-1.5">
+              {[
+                { label: "Total",   value: members.length, color: "text-indigo-600" },
+                { label: "Vivants", value: living,          color: "text-emerald-600" },
+                { label: "Décédés", value: deceased,        color: "text-zinc-400" },
+              ].map(({ label, value, color }) => (
+                <span key={label} className="text-sm text-zinc-400">
+                  <span className={`font-black text-lg ${color}`}>{value}</span> {label}
+                </span>
+              ))}
             </div>
-            {canWrite(treeRole) && (
-              <div className="flex gap-3">
-                <HeroBtn active={panel === "add"} color="indigo" onClick={() => togglePanel("add")}>
-                  + Ajouter
-                </HeroBtn>
-                <HeroBtn active={panel === "union"} color="pink" onClick={() => togglePanel("union")}>
-                  💞 Union
-                </HeroBtn>
-              </div>
-            )}
           </div>
-
-          {/* Stats rapides */}
-          <div className="flex gap-6 mt-8">
-            {[
-              { label: "Total", value: members.length, icon: "👥" },
-              { label: "Vivants", value: living,  icon: "💚" },
-              { label: "Décédés", value: deceased, icon: "🕊️" },
-            ].map(({ label, value, icon }) => (
-              <div key={label} className="text-center">
-                <p className="text-2xl font-bold text-white">{value}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{icon} {label}</p>
-              </div>
-            ))}
-          </div>
+          {canWrite(treeRole) && (
+            <div className="flex gap-2">
+              <button
+                onClick={() => togglePanel("add")}
+                className={`px-4 py-2 rounded-xl text-sm font-bold transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 shadow-sm ${panel === "add" ? "bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-indigo-200" : "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"}`}
+              >
+                + Ajouter
+              </button>
+              <button
+                onClick={() => togglePanel("union")}
+                className={`px-4 py-2 rounded-xl text-sm font-bold transition-all focus:outline-none focus:ring-2 focus:ring-pink-400 focus:ring-offset-2 shadow-sm ${panel === "union" ? "bg-pink-500 text-white shadow-pink-200" : "bg-pink-50 text-pink-700 hover:bg-pink-100"}`}
+              >
+                ♥ Union
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -153,7 +152,7 @@ function MembersPageContent() {
 
         {/* Feedback */}
         {feedback && (
-          <div className={`text-sm px-4 py-3 rounded-xl font-medium ${
+          <div role="status" className={`text-sm px-4 py-3 rounded-xl font-medium ${
             feedback.type === "ok"
               ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
               : "bg-red-50 text-red-600 border border-red-100"
@@ -204,12 +203,11 @@ function MembersPageContent() {
           </div>
         ) : members.length === 0 ? (
           <div className="text-center py-16 space-y-3">
-            <p className="text-5xl">👨‍👩‍👧‍👦</p>
-            <p className="text-slate-500 font-medium">Aucun membre pour l&apos;instant</p>
-            <p className="text-slate-400 text-sm">Commencez par ajouter la première personne de votre famille.</p>
+            <p className="text-zinc-500 font-medium">Aucun membre pour l&apos;instant</p>
+            <p className="text-zinc-400 text-sm">Commencez par ajouter la première personne de votre famille.</p>
             <button
               onClick={() => togglePanel("add")}
-              className="mt-2 px-5 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700"
+              className="mt-2 px-5 py-2 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
             >
               + Ajouter un membre
             </button>
@@ -250,18 +248,6 @@ function MembersPageContent() {
         />
       )}
     </main>
-  );
-}
-
-// ── Hero button ───────────────────────────────────────────────────
-function HeroBtn({ children, onClick, active, color }: { children: React.ReactNode; onClick: () => void; active?: boolean; color: "indigo" | "pink" }) {
-  const base = color === "indigo"
-    ? active ? "bg-indigo-600 text-white" : "bg-white/10 text-white hover:bg-white/20"
-    : active ? "bg-pink-500 text-white" : "bg-white/10 text-white hover:bg-white/20";
-  return (
-    <button onClick={onClick} className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${base}`}>
-      {children}
-    </button>
   );
 }
 

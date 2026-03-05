@@ -75,7 +75,7 @@ export function RegisterForm() {
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
       <div>
-        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Nom complet</label>
+        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-widest">Nom complet</label>
         <input
           {...register("full_name")}
           type="text"
@@ -87,7 +87,7 @@ export function RegisterForm() {
       </div>
 
       <div>
-        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Email</label>
+        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-widest">Email</label>
         <input
           {...register("email")}
           type="email"
@@ -99,7 +99,7 @@ export function RegisterForm() {
       </div>
 
       <div>
-        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-wide">Mot de passe</label>
+        <label className="block text-xs font-semibold text-slate-400 mb-1.5 uppercase tracking-widest">Mot de passe</label>
         <input
           {...register("password")}
           type="password"

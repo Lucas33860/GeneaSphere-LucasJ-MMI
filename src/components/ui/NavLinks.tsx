@@ -3,10 +3,10 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
 const navLinks = [
-  { href: "/tree",      label: "Arbre 3D",    icon: "🌳" },
-  { href: "/members",   label: "Membres",     icon: "👥" },
-  { href: "/relations", label: "Relations",   icon: "💞" },
-  { href: "/stats",     label: "Stats",       icon: "📊" },
+  { href: "/tree",      label: "Arbre 3D"   },
+  { href: "/members",   label: "Membres"    },
+  { href: "/relations", label: "Relations"  },
+  { href: "/stats",     label: "Stats"      },
 ];
 
 export function NavLinks() {
@@ -15,23 +15,22 @@ export function NavLinks() {
   const treeId = searchParams.get("treeId");
 
   return (
-    <div className="flex gap-1">
-      {navLinks.map(({ href, label, icon }) => {
+    <nav className="flex gap-1" aria-label="Navigation principale">
+      {navLinks.map(({ href, label }) => {
         const active = pathname.startsWith(href);
         const fullHref = treeId ? `${href}?treeId=${treeId}` : href;
         return (
           <Link key={href} href={fullHref}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1 focus:ring-offset-slate-900 ${
               active
-                ? "bg-indigo-600 text-white shadow-sm"
+                ? "bg-indigo-600 text-white"
                 : "text-slate-300 hover:bg-white/10 hover:text-white"
             }`}
           >
-            <span className="hidden sm:inline">{icon}</span>
-            <span>{label}</span>
+            {label}
           </Link>
         );
       })}
-    </div>
+    </nav>
   );
 }

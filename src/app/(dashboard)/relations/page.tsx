@@ -110,13 +110,12 @@ function RelationsPageContent() {
 
   if (!treeId) {
     return (
-      <main className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-6 text-center px-4">
-        <div className="text-6xl">💞</div>
+      <main className="min-h-screen bg-zinc-50 flex flex-col items-center justify-center gap-6 text-center px-4">
         <div>
-          <p className="text-xl font-semibold text-slate-800 mb-2">Aucun arbre sélectionné</p>
-          <p className="text-slate-400 text-sm">Choisissez un arbre depuis votre tableau de bord pour voir ses relations.</p>
+          <p className="text-xl font-semibold text-zinc-800 mb-2">Aucun arbre sélectionné</p>
+          <p className="text-zinc-400 text-sm">Choisissez un arbre depuis votre tableau de bord pour voir ses relations.</p>
         </div>
-        <a href="/dashboard" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-xl transition-colors">
+        <a href="/dashboard" className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
           Aller au dashboard
         </a>
       </main>
@@ -124,39 +123,30 @@ function RelationsPageContent() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="min-h-screen bg-zinc-50">
 
-      {/* ── Hero ──────────────────────────────────────────────── */}
-      <div className="bg-linear-to-br from-slate-900 via-pink-950 to-slate-900 px-4 py-10">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-bold text-white">Relations</h1>
-              <p className="text-slate-400 mt-1 text-sm">Unions et liens de parenté</p>
-            </div>
-            <button
-              onClick={() => setShowUnionForm(v => !v)}
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                showUnionForm
-                  ? "bg-white/20 text-white"
-                  : "bg-pink-500 hover:bg-pink-400 text-white"
-              }`}
-            >
-              {showUnionForm ? "Annuler" : "💞 Nouvelle union"}
-            </button>
-          </div>
-
-          {/* Compteurs */}
-          <div className="flex gap-8 mt-8">
-            <div className="text-center">
-              <p className="text-2xl font-bold text-white">{unions.length}</p>
-              <p className="text-slate-400 text-xs mt-0.5">Union{unions.length > 1 ? "s" : ""}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-2xl font-bold text-white">{parentages.length}</p>
-              <p className="text-slate-400 text-xs mt-0.5">Parenté{parentages.length > 1 ? "s" : ""}</p>
+      {/* ── En-tête ─────────────────────────────────────────────── */}
+      <div className="bg-white border-b border-zinc-100 px-4 py-6 shadow-sm">
+        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-black text-zinc-900 tracking-tight">Relations</h1>
+            <div className="flex gap-4 mt-1.5">
+              <span className="text-sm text-zinc-400"><span className="font-black text-lg text-pink-600">{unions.length}</span> union{unions.length > 1 ? "s" : ""}</span>
+              <span className="text-sm text-zinc-400"><span className="font-black text-lg text-indigo-600">{parentages.length}</span> parenté{parentages.length > 1 ? "s" : ""}</span>
             </div>
           </div>
+          {canWrite(treeRole) && (
+          <button
+            onClick={() => setShowUnionForm(v => !v)}
+            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all focus:outline-none focus:ring-2 focus:ring-pink-400 focus:ring-offset-2 shadow-sm ${
+              showUnionForm
+                ? "bg-zinc-100 text-zinc-600"
+                : "bg-pink-50 text-pink-700 hover:bg-pink-100"
+            }`}
+          >
+            {showUnionForm ? "✕ Annuler" : "♥ Nouvelle union"}
+          </button>
+          )}
         </div>
       </div>
 
@@ -164,7 +154,7 @@ function RelationsPageContent() {
 
         {/* Feedback */}
         {feedback && (
-          <div className={`text-sm px-4 py-3 rounded-xl font-medium border ${
+          <div role="status" className={`text-sm px-4 py-3 rounded-xl font-medium border ${
             feedback.type === "ok"
               ? "bg-emerald-50 text-emerald-700 border-emerald-100"
               : "bg-red-50 text-red-600 border-red-100"

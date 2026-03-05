@@ -44,6 +44,28 @@ export async function GET(request: Request) {
   const male_count   = all.filter(m => m.gender === "male").length;
   const female_count = all.filter(m => m.gender === "female").length;
   const other_count  = all.filter(m => m.gender === "other").length;
+  const no_gender_count = all.filter(m => !m.gender).length;
+
+  // Stats par genre
+  const genderStats = (gender: string) => {
+    const g        = all.filter(m => m.gender === gender);
+    const gAlive   = g.filter(m => !m.death_date);
+    const gDead    = g.filter(m =>  m.death_date);
+    const gWithB   = gAlive.filter(m => m.birth_date);
+    const gDeadWB  = gDead.filter(m => m.birth_date);
+    const avgAge   = gWithB.length  ? Math.round(gWithB.reduce((s, m) => s + age(m.birth_date!), 0) / gWithB.length) : null;
+    const avgDeath = gDeadWB.length ? Math.round(gDeadWB.reduce((s, m) => s + age(m.birth_date!, m.death_date), 0) / gDeadWB.length) : null;
+    const byAge    = [...gWithB].sort((a, b) => new Date(a.birth_date!).getTime() - new Date(b.birth_date!).getTime());
+    const oldest   = byAge[0] ? { name: `${byAge[0].first_name} ${byAge[0].last_name}`, age: age(byAge[0].birth_date!), birth_date: byAge[0].birth_date } : null;
+    const fNames: Record<string, number> = {};
+    g.forEach(m => { fNames[m.first_name] = (fNames[m.first_name] ?? 0) + 1; });
+    const mostCommonName = Object.entries(fNames).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    return { living: gAlive.length, deceased: gDead.length, average_age: avgAge, average_age_at_death: avgDeath, oldest, most_common_first_name: mostCommonName };
+  };
+
+  const maleStats   = genderStats("male");
+  const femaleStats = genderStats("female");
+  const otherStats  = genderStats("other");
 
   const firstNames: Record<string, number> = {};
   const lastNames:  Record<string, number> = {};
@@ -73,7 +95,14 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     total_members: all.length, living_count: alive.length, deceased_count: deceased.length,
-    male_count, female_count, other_count,
+    male_count, female_count, other_count, no_gender_count,
+    male_living: maleStats.living, male_deceased: maleStats.deceased,
+    female_living: femaleStats.living, female_deceased: femaleStats.deceased,
+    other_living: otherStats.living, other_deceased: otherStats.deceased,
+    average_age_male: maleStats.average_age, average_age_female: femaleStats.average_age,
+    average_age_at_death_male: maleStats.average_age_at_death, average_age_at_death_female: femaleStats.average_age_at_death,
+    oldest_male: maleStats.oldest, oldest_female: femaleStats.oldest,
+    most_common_first_name_male: maleStats.most_common_first_name, most_common_first_name_female: femaleStats.most_common_first_name,
     total_unions: ua.length, couple_count, ex_couple_count, marriage_count, divorce_count,
     oldest_member, youngest_member, average_age, average_age_at_death,
     most_common_first_name, last_names_top5, birth_decades,
