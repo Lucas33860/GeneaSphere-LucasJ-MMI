@@ -51,13 +51,6 @@ Application disponible sur [http://localhost:3000](http://localhost:3000).
 
 GeneaSphere utilise **Supabase Auth** comme fournisseur d'identité, intégré via `@supabase/ssr` pour une gestion sécurisée des sessions en SSR (Server-Side Rendering).
 
-#### Deux modes de connexion
-
-| Mode | Mécanisme |
-|---|---|
-| **Email + mot de passe** | `supabase.auth.signUp()` / `signInWithPassword()` + confirmation email |
-| **Google OAuth** | `supabase.auth.signInWithOAuth({ provider: 'google' })` + callback `/auth/callback` |
-
 #### Flux Email / Mot de passe
 
 1. L'utilisateur soumet le formulaire (validé par **Zod** côté client)
@@ -66,24 +59,11 @@ GeneaSphere utilise **Supabase Auth** comme fournisseur d'identité, intégré v
 4. Le JWT est stocké dans des **cookies HTTP-only** via `@supabase/ssr` (immunisé contre le vol XSS)
 5. À chaque requête, `proxy.ts` (middleware Next.js) **rafraîchit automatiquement** le JWT si nécessaire
 
-#### Flux Google OAuth (PKCE)
-
-```
-Navigateur → supabase.auth.signInWithOAuth('google')
-          → Redirection vers accounts.google.com
-          → Google authentifie → retourne un code PKCE
-          → /auth/callback?code=xxx
-          → supabase.auth.exchangeCodeForSession(code)
-          → Session JWT créée dans les cookies → /dashboard
-```
-
-Le flow utilise **PKCE (Proof Key for Code Exchange)** — Supabase le gère automatiquement, ce qui empêche les attaques par interception du code OAuth.
-
 #### Protection des routes — `proxy.ts`
 
 ```
 Toute requête → proxy.ts
-  ├── Route publique (/, /login, /register, /auth/callback) → passe
+  ├── Route publique (/, /login, /register) → passe
   ├── Utilisateur non connecté + route protégée → redirect /login
   └── Utilisateur connecté + /login ou /register → redirect /dashboard
 ```
@@ -134,32 +114,6 @@ Un membre marqué `is_private` n'est visible que par son créateur ou un admin. 
 #### 6. Mots de passe
 
 Supabase stocke les mots de passe avec **bcrypt** (salt aléatoire par utilisateur). GeneaSphere n'a jamais accès aux mots de passe en clair.
-
----
-
-### Configurer Google OAuth (Supabase + Google Cloud)
-
-#### Côté Google Cloud Console
-
-1. Aller sur [console.cloud.google.com](https://console.cloud.google.com)
-2. Créer un projet (ou utiliser l'existant)
-3. **APIs & Services → Credentials → Create OAuth 2.0 Client ID**
-4. Type : **Web application**
-5. Ajouter dans **Authorized redirect URIs** :
-   ```
-   https://<votre-projet>.supabase.co/auth/v1/callback
-   ```
-6. Copier **Client ID** et **Client Secret**
-
-#### Côté Supabase
-
-1. **Authentication → Providers → Google** → activer
-2. Coller **Client ID** et **Client Secret**
-3. Dans **Authentication → URL Configuration** :
-   - Site URL : `https://genea-sphere-lucas-j-mmi.vercel.app`
-   - Redirect URLs : `https://genea-sphere-lucas-j-mmi.vercel.app/**`
-
-En local, ajouter également `http://localhost:3000/**` dans les Redirect URLs.
 
 ---
 
@@ -299,7 +253,6 @@ Chaque utilisateur peut créer **plusieurs arbres** nommés et les partager avec
 
 ### Auth & Administration
 - Inscription email + confirmation (Supabase Auth + JWT HTTP-only cookies)
-- **Connexion Google OAuth** (PKCE) — un clic, pas de mot de passe
 - Approbation manuelle des nouveaux comptes par un admin
 - Gestion des utilisateurs (admin uniquement)
 - RLS PostgreSQL + vérification des rôles côté API
@@ -350,11 +303,11 @@ L'arbre est calculé dynamiquement à chaque clic. Les nœuds sont des points en
 
 | Constante | Valeur | Rôle |
 |---|---|---|
-| `PARENT_Y` | 9 | Décalage vertical entre une génération et ses parents |
-| `PARENT_X` | 7 | Écart horizontal père/mère autour de l'axe de l'enfant |
-| `UNION_Y` | 4.5 | Hauteur du nœud union entre les deux partenaires |
-| `RADIUS` | 13 | Rayon du cercle pour placer les partenaires/demi-fratrie |
-| `MIN_DIST` | 7 | Distance minimale entre deux nœuds (anti-collision) |
+| `PARENT_Y` | 16 | Décalage vertical entre une génération et ses parents |
+| `PARENT_X` | 12 | Écart horizontal père/mère autour de l'axe de l'enfant |
+| `UNION_Y` | 8 | Hauteur du nœud union entre les deux partenaires |
+| `RADIUS` | 22 | Rayon du cercle pour placer les partenaires/demi-fratrie |
+| `MIN_DIST` | 12 | Distance minimale entre deux nœuds (anti-collision) |
 
 ---
 
@@ -374,33 +327,33 @@ Cela arrive quand il n'y a qu'un seul parent (père ou mère seul·e) : l'edge `
 
 **Horizontal pur** — deux nœuds au même Y, même X, seul Z diffère :
 ```
-frère [x-9, y, z+8] ── [x-9, y, z-8] ── … (même plan horizontal)
+frère [x, y, z+16] ── [x, y, z-16] ── … (même plan horizontal)
 ```
-Les frères/sœurs sont placés au même Y que la personne cliquée, décalés uniquement en Z.
+Les frères/sœurs sont placés au même Y que la personne cliquée, décalés uniquement en Z (espacement MIN_DIST + 4 = 16 unités).
 
 ### Cas qui donnent des diagonales
 
 **La structure en V des parents** — c'est le cas le plus visible :
 
 ```
-père [-7, +9, z]      mère [+7, +9, z]
-      \                    /
-       \                  /
-        union [0, +4.5, z]       ← nœud intermédiaire
-               |
-              moi [0, 0, z]
+père [-12, +16, z]      mère [+12, +16, z]
+       \                       /
+        \                     /
+         union [0, +8, z]        ← nœud intermédiaire
+                |
+               moi [0, 0, z]
 ```
 
-Le père est à `(-7, +9)` et l'union à `(0, +4.5)` : les deux axes X et Y changent en même temps → diagonale à ~45°. C'est voulu : ça dessine un **V inversé** pour montrer que les deux parents convergent vers l'union.
+Le père est à `(-12, +16)` et l'union à `(0, +8)` : les deux axes X et Y changent en même temps → diagonale. C'est voulu : ça dessine un **V inversé** pour montrer que les deux parents convergent vers l'union.
 
 **Les demi-fratries et partenaires multiples — placement en cercle** :
 
-Quand un parent a eu plusieurs unions, ses partenaires sont répartis en cercle autour de lui à `RADIUS = 13` unités. L'angle est calculé pour ne pas écraser l'union déjà existante :
+Quand un parent a eu plusieurs unions, ses partenaires sont répartis en cercle autour de lui à `RADIUS = 22` unités. L'angle est calculé pour ne pas écraser l'union déjà existante :
 
 ```ts
 const angle = startAngle + (2π / N_total) * slotIdx;
-partner.x = parent.x + 13 * cos(angle)
-partner.z = parent.z + 13 * sin(angle)
+partner.x = parent.x + 22 * cos(angle)
+partner.z = parent.z + 22 * sin(angle)
 // même Y que le parent → trait complètement horizontal dans le plan XZ
 ```
 
@@ -408,7 +361,7 @@ Le trait entre le parent et son nœud d'union avec ce partenaire est donc dans l
 
 **L'anti-collision déplace les nœuds** — cause principale des diagonales inattendues :
 
-La fonction `findFreePos` essaie d'abord la position idéale (qui donnerait un trait droit). Si cette position est trop proche d'un nœud existant (< 7 unités), elle cherche une position libre en spirale autour du point désiré :
+La fonction `findFreePos` essaie d'abord la position idéale (qui donnerait un trait droit). Si cette position est trop proche d'un nœud existant (< 12 unités), elle cherche une position libre en spirale autour du point désiré :
 
 ```
 anneau r=1 → 8 candidats répartis en cercle
@@ -416,7 +369,7 @@ anneau r=2 → 16 candidats
 …jusqu'à r=16
 ```
 
-Si le père idéal aurait été à `(-7, +9, 0)` mais qu'il y a déjà un nœud là, il sera placé à `(-7, +9, 7)` ou `(-14, +9, 7)` etc. Le trait résultant aura alors une composante Z inattendue → diagonale.
+Si le père idéal aurait été à `(-12, +16, 0)` mais qu'il y a déjà un nœud là, il sera placé à `(-12, +16, 12)` ou `(-24, +16, 12)` etc. Le trait résultant aura alors une composante Z inattendue → diagonale.
 
 ### Résumé visuel
 

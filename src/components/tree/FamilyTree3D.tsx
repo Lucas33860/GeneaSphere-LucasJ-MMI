@@ -515,9 +515,9 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
       const side = i % 2 === 0 ? 1 : -1;
       const dist = Math.ceil((i + 1) / 2);
       const desired: [number, number, number] = [
-        selfPos[0] - 9,
+        selfPos[0],
         selfPos[1],
-        selfPos[2] + side * dist * 8,
+        selfPos[2] + side * dist * (MIN_DIST + 4),
       ];
       const actualSib = addPerson(sib, desired);
       const fromPos = actualParentUnionPos ?? selfPos;
@@ -566,9 +566,9 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
           const hSide = hci % 2 === 0 ? 1 : -1;
           const hDist = Math.ceil((hci + 1) / 2);
           const desired: [number, number, number] = [
-            selfPos[0] - 9,
+            selfPos[0],
             selfPos[1],
-            selfPos[2] + hSide * (sibOffset + hDist) * 8,
+            selfPos[2] + hSide * (sibOffset + hDist) * (MIN_DIST + 4),
           ];
           const actualHalfChild = addPerson(halfChild, desired);
           if (actualMother) addEdge(`e-alone-m-${halfChild.id}`, actualMother, actualHalfChild);
@@ -650,9 +650,9 @@ export function FamilyTree3D({ rootId, resetKey, viewMode = "free", showHistory 
           const hSide = hci % 2 === 0 ? 1 : -1;
           const hDist = Math.ceil((hci + 1) / 2);
           const desired: [number, number, number] = [
-            selfPos[0] - 9,
+            selfPos[0],
             selfPos[1],
-            selfPos[2] + hSide * (sibOffset + hDist) * 8,
+            selfPos[2] + hSide * (sibOffset + hDist) * (MIN_DIST + 4),
           ];
           const actualHalfChild = addPerson(halfChild, desired);
           if (actualFather) addEdge(`e-alone-f-${halfChild.id}`, actualFather, actualHalfChild);
